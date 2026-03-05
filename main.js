@@ -13,11 +13,9 @@ const UV_PRESETS = {
   default: { x: 1500, y: 1500, width: 1000, height: 1000 }
 };
 
-const state = {
-  sourceFolder: null,
-  items: [],
-  previewLayerId: null
-};
+const PREVIEW_LAYER_PREFIX = "__KIT_PREVIEW__";
+
+const state = { sourceFolder: null, items: [] };
 
 const statusEl = document.getElementById("status");
 const listEl = document.getElementById("assetList");
@@ -30,17 +28,9 @@ function setStatus(message, isError = false) {
   statusEl.classList.toggle("error", isError);
 }
 
-function isAssetFile(name) {
-  return /\.(png|jpg|jpeg|psd|tif|tiff)$/i.test(name);
-}
-
-function isPreviewableImage(name) {
-  return /\.(png|jpg|jpeg)$/i.test(name);
-}
-
-function isPsd(name) {
-  return /\.psd$/i.test(name);
-}
+const isAssetFile = (name) => /\.(png|jpg|jpeg|psd|tif|tiff)$/i.test(name);
+const isPreviewableImage = (name) => /\.(png|jpg|jpeg)$/i.test(name);
+const isPsd = (name) => /\.psd$/i.test(name);
 
 function base64FromUint8(uint8) {
   let binary = "";
@@ -65,9 +55,7 @@ async function buildThumbnail(file, fileName) {
 
 async function scanFolder(folder, parentPath = "", category = null, depth = 0) {
   const out = [];
-  const entries = await folder.getEntries();
-
-  for (const entry of entries) {
+  for (const entry of await folder.getEntries()) {
     const rel = parentPath ? `${parentPath}/${entry.name}` : entry.name;
 
     if (entry.isFile && isAssetFile(entry.name)) {
@@ -123,7 +111,7 @@ function renderItems() {
     return;
   }
 
-  items.forEach((item) => {
+  for (const item of items) {
     const preset = UV_PRESETS[item.category] || UV_PRESETS.default;
     const row = document.createElement("article");
     row.className = "item";
@@ -138,7 +126,7 @@ function renderItems() {
         <div>
           <div class="item-title">${item.name}</div>
           <div class="meta">${item.path}</div>
-          <div class="meta">${isPsd(item.fileName) ? "PSD native placement" : `UV slot ${preset.x},${preset.y},${preset.width},${preset.height}`}</div>
+          <div class="meta">${isPsd(item.fileName) ? "PSD keeps native position/scale" : `UV slot ${preset.x},${preset.y},${preset.width},${preset.height}`}</div>
         </div>
       </div>
     `;
@@ -154,17 +142,14 @@ function renderItems() {
     placeBtn.textContent = "Place in document";
     placeBtn.addEventListener("click", () => placeItem(item));
 
-    actions.appendChild(previewBtn);
-    actions.appendChild(placeBtn);
+    actions.append(previewBtn, placeBtn);
     row.appendChild(actions);
-
     listEl.appendChild(row);
-  });
+  }
 }
 
 async function getActiveDocumentPixels() {
   if (!app.activeDocument) throw new Error("Open a document first.");
-
   const [widthResult, heightResult] = await action.batchPlay(
     [
       { _obj: "get", _target: [{ _property: "width" }, { _ref: "document", _enum: "ordinal", _value: "targetEnum" }] },
@@ -172,168 +157,132 @@ async function getActiveDocumentPixels() {
     ],
     {}
   );
-
   return { width: widthResult.width._value, height: heightResult.height._value };
 }
 
-async function getLayerBounds(layerId) {
-  const [result] = await action.batchPlay(
-    [{ _obj: "get", _target: [{ _ref: "layer", _id: layerId }], _options: { dialogOptions: "dontDisplay" } }],
-    {}
-  );
-  const b = result.boundsNoEffects || result.bounds;
-  return {
-    left: b.left._value,
-    top: b.top._value,
-    right: b.right._value,
-    bottom: b.bottom._value
+async function collectPreviewLayerIds() {
+  const result = [];
+  const walk = (layers) => {
+    for (const layer of layers || []) {
+      if (layer?.name && layer.name.startsWith(PREVIEW_LAYER_PREFIX) && layer.id) {
+        result.push(layer.id);
+      }
+      if (layer?.layers?.length) {
+        walk(layer.layers);
+      }
+    }
   };
+
+  try {
+    walk(app.activeDocument?.layers || []);
+  } catch {
+    return result;
+  }
+
+  return result;
 }
 
 async function deleteLayerById(layerId) {
-  if (!layerId) return;
+  await action.batchPlay([{ _obj: "delete", _target: [{ _ref: "layer", _id: layerId }] }], {});
+}
+
+async function clearAllPreviewLayersUnsafe() {
+  const ids = await collectPreviewLayerIds();
+  for (const id of ids) {
+    try {
+      await deleteLayerById(id);
+    } catch {
+      // continue
+    }
+  }
+}
+
+async function setLayerOpacity(layerId, opacity) {
   await action.batchPlay(
-    [{ _obj: "delete", _target: [{ _ref: "layer", _id: layerId }] }],
+    [{ _obj: "set", _target: [{ _ref: "layer", _id: layerId }], to: { _obj: "layer", opacity: { _unit: "percentUnit", _value: opacity } } }],
+    {}
+  );
+}
+
+async function setLayerName(layerId, name) {
+  await action.batchPlay(
+    [{ _obj: "set", _target: [{ _ref: "layer", _id: layerId }], to: { _obj: "layer", name } }],
     {}
   );
 }
 
 async function placeRaw(item, isPreview = false) {
   const token = await fs.createSessionToken(item.entry);
+
+  if (isPsd(item.fileName)) {
+    const [placed] = await action.batchPlay(
+      [{ _obj: "placeEvent", null: { _path: token, _kind: "local" }, linked: true }],
+      {}
+    );
+    if (isPreview) {
+      await setLayerName(placed.ID, `${PREVIEW_LAYER_PREFIX} ${item.name}`);
+      await setLayerOpacity(placed.ID, 45);
+    }
+    return;
+  }
+
   const doc = await getActiveDocumentPixels();
   const scaleX = doc.width / REFERENCE_UV.width;
   const scaleY = doc.height / REFERENCE_UV.height;
   const slot = UV_PRESETS[item.category] || UV_PRESETS.default;
 
-  if (isPsd(item.fileName)) {
-    const [placed] = await action.batchPlay(
-      [
-        {
-          _obj: "placeEvent",
-          null: { _path: token, _kind: "local" },
-          linked: true
-        }
-      ],
-      {}
-    );
-
-    const layerId = placed.ID;
-    const b = await getLayerBounds(layerId);
-
-    await action.batchPlay(
-      [
-        {
-          _obj: "move",
-          _target: [{ _ref: "layer", _id: layerId }],
-          to: {
-            _obj: "offset",
-            horizontal: { _unit: "pixelsUnit", _value: -b.left },
-            vertical: { _unit: "pixelsUnit", _value: -b.top }
-          }
-        }
-      ],
-      {}
-    );
-
-    if (isPreview) {
-      await action.batchPlay(
-        [
-          {
-            _obj: "set",
-            _target: [{ _ref: "layer", _id: layerId }],
-            to: { _obj: "layer", opacity: { _unit: "percentUnit", _value: 45 } }
-          }
-        ],
-        {}
-      );
-    }
-
-    return layerId;
-  }
-
   const [placed] = await action.batchPlay(
-    [
-      {
-        _obj: "placeEvent",
-        null: { _path: token, _kind: "local" },
-        linked: true,
-        offset: {
-          _obj: "offset",
-          horizontal: { _unit: "pixelsUnit", _value: slot.x * scaleX },
-          vertical: { _unit: "pixelsUnit", _value: slot.y * scaleY }
-        },
-        width: { _unit: "pixelsUnit", _value: slot.width * scaleX },
-        height: { _unit: "pixelsUnit", _value: slot.height * scaleY }
-      }
-    ],
+    [{
+      _obj: "placeEvent",
+      null: { _path: token, _kind: "local" },
+      linked: true,
+      offset: { _obj: "offset", horizontal: { _unit: "pixelsUnit", _value: slot.x * scaleX }, vertical: { _unit: "pixelsUnit", _value: slot.y * scaleY } },
+      width: { _unit: "pixelsUnit", _value: slot.width * scaleX },
+      height: { _unit: "pixelsUnit", _value: slot.height * scaleY }
+    }],
     {}
   );
 
   if (isPreview) {
-    await action.batchPlay(
-      [
-        {
-          _obj: "set",
-          _target: [{ _ref: "layer", _id: placed.ID }],
-          to: { _obj: "layer", opacity: { _unit: "percentUnit", _value: 45 } }
-        }
-      ],
-      {}
-    );
+    await setLayerName(placed.ID, `${PREVIEW_LAYER_PREFIX} ${item.name}`);
+    await setLayerOpacity(placed.ID, 45);
   }
-
-  return placed.ID;
 }
 
 async function clearPreview() {
-  if (!state.previewLayerId) return;
-
-  await core.executeAsModal(async () => {
-    await deleteLayerById(state.previewLayerId);
-    state.previewLayerId = null;
-  }, { commandName: "Clear KIT Preview" });
-
-  setStatus("Preview cleared.");
+  try {
+    await core.executeAsModal(async () => {
+      await clearAllPreviewLayersUnsafe();
+    }, { commandName: "Clear KIT Preview" });
+    setStatus("Preview cleared.");
+  } catch (error) {
+    setStatus(`Clear preview failed: ${error.message}`, true);
+  }
 }
 
 async function previewItem(item) {
-  if (!state.sourceFolder) {
-    setStatus("Choose a source folder first.", true);
-    return;
-  }
+  if (!state.sourceFolder) return setStatus("Choose a source folder first.", true);
 
   try {
     await core.executeAsModal(async () => {
-      if (state.previewLayerId) {
-        await deleteLayerById(state.previewLayerId);
-        state.previewLayerId = null;
-      }
-
-      state.previewLayerId = await placeRaw(item, true);
+      await clearAllPreviewLayersUnsafe();
+      await placeRaw(item, true);
     }, { commandName: `Preview ${item.name}` });
-
-    setStatus(`Previewing ${item.name}. Scroll and preview other options.`);
+    setStatus(`Previewing ${item.name}. Previous preview removed automatically.`);
   } catch (error) {
     setStatus(`Preview failed: ${error.message}`, true);
   }
 }
 
 async function placeItem(item) {
-  if (!state.sourceFolder) {
-    setStatus("Choose a source folder first.", true);
-    return;
-  }
+  if (!state.sourceFolder) return setStatus("Choose a source folder first.", true);
 
   try {
     await core.executeAsModal(async () => {
-      if (state.previewLayerId) {
-        await deleteLayerById(state.previewLayerId);
-        state.previewLayerId = null;
-      }
+      await clearAllPreviewLayersUnsafe();
       await placeRaw(item, false);
     }, { commandName: `Place ${item.name}` });
-
-    setStatus(`Placed ${item.name}.`);
+    setStatus(`Placed ${item.name}. Only final layer kept.`);
   } catch (error) {
     setStatus(`Place failed: ${error.message}`, true);
   }

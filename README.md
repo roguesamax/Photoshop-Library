@@ -17,9 +17,9 @@ Top-level subfolder names are used as categories.
 
 ## Key behavior for PSD workflows
 
-- You can now **preview selected assets directly on top of the active PSD** (semi-transparent overlay) while browsing options.
+- You can now **preview selected assets directly on top of the active PSD** (semi-transparent overlay) while browsing options, and each new preview automatically clears the previous one.
 - This works for **PSD assets**, so users can scroll through variants (e.g., 5 collars) and visually confirm the correct one.
-- For PSD files, placement now uses **native PSD placement** (no UV preset resize), which avoids the previous “too big / wrong location” behavior.
+- For PSD files, placement now uses **native PSD placement** (no UV preset resize or forced top-left move), so PSD assets keep their authored position/scale.
 - For non-PSD assets (PNG/JPG/TIFF), UV preset placement is still used.
 
 ## Option A: UXP panel (dark mode)
@@ -29,7 +29,7 @@ Top-level subfolder names are used as categories.
 3. Click **Choose Source Folder**.
 4. Use **Preview on document** to audition options.
 5. Click **Place in document** when correct.
-6. Use **Clear Preview Overlay** to remove temporary preview layer.
+6. Use **Clear Preview Overlay** to remove temporary preview layers (or they clear automatically when previewing another option or placing final).
 
 ## Option B: No-login script route
 

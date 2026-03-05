@@ -17,6 +17,9 @@ app.bringToFront();
         "default": { x: 1500, y: 1500, width: 1000, height: 1000 }
     };
 
+
+    var PREVIEW_LAYER_PREFIX = "__KIT_PREVIEW__";
+
     var state = {
         sourceFolder: null,
         items: [],
@@ -78,10 +81,24 @@ app.bringToFront();
         return state.filteredItems[list.selection.index];
     }
 
-    function clearPreviewLayer() {
-        if (state.previewLayer && state.previewLayer.isValid) {
-            state.previewLayer.remove();
+    function removePreviewLayersRecursive(parent) {
+        for (var i = parent.layers.length - 1; i >= 0; i--) {
+            var lyr = parent.layers[i];
+            if (lyr.typename === "LayerSet") {
+                removePreviewLayersRecursive(lyr);
+                if (lyr.name && lyr.name.indexOf(PREVIEW_LAYER_PREFIX) === 0) {
+                    lyr.remove();
+                }
+            } else if (lyr.name && lyr.name.indexOf(PREVIEW_LAYER_PREFIX) === 0) {
+                lyr.remove();
+            }
         }
+    }
+
+    function clearPreviewLayer() {
+        try {
+            removePreviewLayersRecursive(app.activeDocument);
+        } catch (e) {}
         state.previewLayer = null;
     }
 
@@ -132,7 +149,7 @@ app.bringToFront();
 
         if (previewOnly) {
             layer.opacity = 45;
-            layer.name = "__KIT_PREVIEW__ " + item.name;
+            layer.name = PREVIEW_LAYER_PREFIX + " " + item.name;
             state.previewLayer = layer;
         }
 
