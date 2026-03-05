@@ -172,3 +172,14 @@ footer.error {
   text-align: center;
   padding: 4px;
 }
+
+
+.item-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.item-actions button {
+  width: 100%;
+}

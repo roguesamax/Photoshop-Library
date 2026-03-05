@@ -15,13 +15,15 @@ const UV_PRESETS = {
 
 const state = {
   sourceFolder: null,
-  items: []
+  items: [],
+  previewLayerId: null
 };
 
 const statusEl = document.getElementById("status");
 const listEl = document.getElementById("assetList");
 const searchInput = document.getElementById("searchInput");
 const sourceMeta = document.getElementById("sourceMeta");
+const clearPreviewBtn = document.getElementById("clearPreviewBtn");
 
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
@@ -32,8 +34,12 @@ function isAssetFile(name) {
   return /\.(png|jpg|jpeg|psd|tif|tiff)$/i.test(name);
 }
 
-function isPreviewable(name) {
+function isPreviewableImage(name) {
   return /\.(png|jpg|jpeg)$/i.test(name);
+}
+
+function isPsd(name) {
+  return /\.psd$/i.test(name);
 }
 
 function base64FromUint8(uint8) {
@@ -46,11 +52,8 @@ function base64FromUint8(uint8) {
   return btoa(binary);
 }
 
-async function buildPreviewDataUrl(file, fileName) {
-  if (!isPreviewable(fileName)) {
-    return null;
-  }
-
+async function buildThumbnail(file, fileName) {
+  if (!isPreviewableImage(fileName)) return null;
   try {
     const bytes = await file.read({ format: formats.binary });
     const mime = fileName.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
@@ -74,7 +77,7 @@ async function scanFolder(folder, parentPath = "", category = null, depth = 0) {
         path: rel,
         entry,
         category: (category || "default").toLowerCase(),
-        thumbnail: await buildPreviewDataUrl(entry, entry.name)
+        thumbnail: await buildThumbnail(entry, entry.name)
       });
     }
 
@@ -93,7 +96,7 @@ async function chooseSourceFolder() {
     if (!folder) return;
 
     state.sourceFolder = folder;
-    setStatus("Scanning folder and generating previews...");
+    setStatus("Scanning folder...");
     state.items = await scanFolder(folder);
 
     sourceMeta.textContent = `Source: ${folder.name} (${state.items.length} assets)`;
@@ -113,10 +116,7 @@ function renderItems() {
   }
 
   const query = searchInput.value.trim().toLowerCase();
-  const items = state.items.filter((item) => {
-    if (!query) return true;
-    return item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query);
-  });
+  const items = state.items.filter((item) => !query || item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query));
 
   if (!items.length) {
     listEl.innerHTML = '<div class="hint">No matching assets.</div>';
@@ -130,7 +130,7 @@ function renderItems() {
 
     const thumb = item.thumbnail
       ? `<img class="thumb" src="${item.thumbnail}" alt="${item.name}" />`
-      : `<div class="thumb thumb-placeholder">No preview</div>`;
+      : `<div class="thumb thumb-placeholder">${isPsd(item.fileName) ? "PSD" : "No preview"}</div>`;
 
     row.innerHTML = `
       <div class="item-layout">
@@ -138,15 +138,26 @@ function renderItems() {
         <div>
           <div class="item-title">${item.name}</div>
           <div class="meta">${item.path}</div>
-          <div class="meta">Category: ${item.category} · UV slot ${preset.x},${preset.y},${preset.width},${preset.height}</div>
+          <div class="meta">${isPsd(item.fileName) ? "PSD native placement" : `UV slot ${preset.x},${preset.y},${preset.width},${preset.height}`}</div>
         </div>
       </div>
     `;
 
-    const button = document.createElement("button");
-    button.textContent = "Place in document";
-    button.addEventListener("click", () => placeItem(item));
-    row.appendChild(button);
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+
+    const previewBtn = document.createElement("button");
+    previewBtn.textContent = "Preview on document";
+    previewBtn.addEventListener("click", () => previewItem(item));
+
+    const placeBtn = document.createElement("button");
+    placeBtn.textContent = "Place in document";
+    placeBtn.addEventListener("click", () => placeItem(item));
+
+    actions.appendChild(previewBtn);
+    actions.appendChild(placeBtn);
+    row.appendChild(actions);
+
     listEl.appendChild(row);
   });
 }
@@ -165,6 +176,148 @@ async function getActiveDocumentPixels() {
   return { width: widthResult.width._value, height: heightResult.height._value };
 }
 
+async function getLayerBounds(layerId) {
+  const [result] = await action.batchPlay(
+    [{ _obj: "get", _target: [{ _ref: "layer", _id: layerId }], _options: { dialogOptions: "dontDisplay" } }],
+    {}
+  );
+  const b = result.boundsNoEffects || result.bounds;
+  return {
+    left: b.left._value,
+    top: b.top._value,
+    right: b.right._value,
+    bottom: b.bottom._value
+  };
+}
+
+async function deleteLayerById(layerId) {
+  if (!layerId) return;
+  await action.batchPlay(
+    [{ _obj: "delete", _target: [{ _ref: "layer", _id: layerId }] }],
+    {}
+  );
+}
+
+async function placeRaw(item, isPreview = false) {
+  const token = await fs.createSessionToken(item.entry);
+  const doc = await getActiveDocumentPixels();
+  const scaleX = doc.width / REFERENCE_UV.width;
+  const scaleY = doc.height / REFERENCE_UV.height;
+  const slot = UV_PRESETS[item.category] || UV_PRESETS.default;
+
+  if (isPsd(item.fileName)) {
+    const [placed] = await action.batchPlay(
+      [
+        {
+          _obj: "placeEvent",
+          null: { _path: token, _kind: "local" },
+          linked: true
+        }
+      ],
+      {}
+    );
+
+    const layerId = placed.ID;
+    const b = await getLayerBounds(layerId);
+
+    await action.batchPlay(
+      [
+        {
+          _obj: "move",
+          _target: [{ _ref: "layer", _id: layerId }],
+          to: {
+            _obj: "offset",
+            horizontal: { _unit: "pixelsUnit", _value: -b.left },
+            vertical: { _unit: "pixelsUnit", _value: -b.top }
+          }
+        }
+      ],
+      {}
+    );
+
+    if (isPreview) {
+      await action.batchPlay(
+        [
+          {
+            _obj: "set",
+            _target: [{ _ref: "layer", _id: layerId }],
+            to: { _obj: "layer", opacity: { _unit: "percentUnit", _value: 45 } }
+          }
+        ],
+        {}
+      );
+    }
+
+    return layerId;
+  }
+
+  const [placed] = await action.batchPlay(
+    [
+      {
+        _obj: "placeEvent",
+        null: { _path: token, _kind: "local" },
+        linked: true,
+        offset: {
+          _obj: "offset",
+          horizontal: { _unit: "pixelsUnit", _value: slot.x * scaleX },
+          vertical: { _unit: "pixelsUnit", _value: slot.y * scaleY }
+        },
+        width: { _unit: "pixelsUnit", _value: slot.width * scaleX },
+        height: { _unit: "pixelsUnit", _value: slot.height * scaleY }
+      }
+    ],
+    {}
+  );
+
+  if (isPreview) {
+    await action.batchPlay(
+      [
+        {
+          _obj: "set",
+          _target: [{ _ref: "layer", _id: placed.ID }],
+          to: { _obj: "layer", opacity: { _unit: "percentUnit", _value: 45 } }
+        }
+      ],
+      {}
+    );
+  }
+
+  return placed.ID;
+}
+
+async function clearPreview() {
+  if (!state.previewLayerId) return;
+
+  await core.executeAsModal(async () => {
+    await deleteLayerById(state.previewLayerId);
+    state.previewLayerId = null;
+  }, { commandName: "Clear KIT Preview" });
+
+  setStatus("Preview cleared.");
+}
+
+async function previewItem(item) {
+  if (!state.sourceFolder) {
+    setStatus("Choose a source folder first.", true);
+    return;
+  }
+
+  try {
+    await core.executeAsModal(async () => {
+      if (state.previewLayerId) {
+        await deleteLayerById(state.previewLayerId);
+        state.previewLayerId = null;
+      }
+
+      state.previewLayerId = await placeRaw(item, true);
+    }, { commandName: `Preview ${item.name}` });
+
+    setStatus(`Previewing ${item.name}. Scroll and preview other options.`);
+  } catch (error) {
+    setStatus(`Preview failed: ${error.message}`, true);
+  }
+}
+
 async function placeItem(item) {
   if (!state.sourceFolder) {
     setStatus("Choose a source folder first.", true);
@@ -172,34 +325,15 @@ async function placeItem(item) {
   }
 
   try {
-    const token = await fs.createSessionToken(item.entry);
-
     await core.executeAsModal(async () => {
-      const doc = await getActiveDocumentPixels();
-      const scaleX = doc.width / REFERENCE_UV.width;
-      const scaleY = doc.height / REFERENCE_UV.height;
-      const slot = UV_PRESETS[item.category] || UV_PRESETS.default;
-
-      await action.batchPlay(
-        [
-          {
-            _obj: "placeEvent",
-            null: { _path: token, _kind: "local" },
-            linked: true,
-            offset: {
-              _obj: "offset",
-              horizontal: { _unit: "pixelsUnit", _value: slot.x * scaleX },
-              vertical: { _unit: "pixelsUnit", _value: slot.y * scaleY }
-            },
-            width: { _unit: "pixelsUnit", _value: slot.width * scaleX },
-            height: { _unit: "pixelsUnit", _value: slot.height * scaleY }
-          }
-        ],
-        {}
-      );
+      if (state.previewLayerId) {
+        await deleteLayerById(state.previewLayerId);
+        state.previewLayerId = null;
+      }
+      await placeRaw(item, false);
     }, { commandName: `Place ${item.name}` });
 
-    setStatus(`Placed ${item.name} in ${item.category} UV slot.`);
+    setStatus(`Placed ${item.name}.`);
   } catch (error) {
     setStatus(`Place failed: ${error.message}`, true);
   }
@@ -207,5 +341,6 @@ async function placeItem(item) {
 
 document.getElementById("chooseSourceFolderBtn").addEventListener("click", chooseSourceFolder);
 searchInput.addEventListener("input", renderItems);
+clearPreviewBtn.addEventListener("click", clearPreview);
 
 renderItems();
