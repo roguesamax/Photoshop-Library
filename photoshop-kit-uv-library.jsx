@@ -71,6 +71,18 @@ app.bringToFront();
         return out;
     }
 
+    function setAllLayersVisible(container) {
+        try {
+            for (var i = 0; i < container.layers.length; i++) {
+                var lyr = container.layers[i];
+                lyr.visible = true;
+                if (lyr.typename === "LayerSet") {
+                    setAllLayersVisible(lyr);
+                }
+            }
+        } catch (e) {}
+    }
+
     function scanFolder(folder, relPrefix, category, depth, out) {
         var files = folder.getFiles();
         for (var i = 0; i < files.length; i++) {
@@ -120,13 +132,6 @@ app.bringToFront();
         return normalizePath(state.sourceFolder.fsName + "/" + item.path);
     }
 
-    function cachedPreviewFileFor(item) {
-        ensureCacheFolder();
-        var key = cacheKeyFor(item);
-        var hash = simpleHash(key);
-        return new File(CACHE_FOLDER.fsName + "/" + hash + ".png");
-    }
-
     function sourceMtimeToken(file) {
         try {
             return file.modified ? String(file.modified.getTime()) : "0";
@@ -148,65 +153,15 @@ app.bringToFront();
         }
     }
 
-    function generatePsdPreview(file, item) {
-        var outFile = cachedPreviewFileFor(item);
-        var metaFile = new File(outFile.fsName + ".meta");
-        var srcToken = sourceMtimeToken(file) + "|v4";
-
-        if (outFile.exists && readCacheMeta(metaFile) === srcToken) {
-            return outFile;
-        }
-
-        var originalDoc = app.activeDocument;
-        var src = null;
-        var dup = null;
-
+    function writeCacheMeta(metaFile, token) {
         try {
-            src = app.open(file);
-            dup = src.duplicate(item.name + "_preview", true);
-            src.close(SaveOptions.DONOTSAVECHANGES);
-            src = null;
-
-            app.activeDocument = dup;
-            dup.flatten();
-
-            var originalUnits = app.preferences.rulerUnits;
-            app.preferences.rulerUnits = Units.PIXELS;
-
-            var target = getPreviewTargetSize();
-            var w = dup.width.as("px");
-            var h = dup.height.as("px");
-            var ratio = w > h ? (target / w) : (target / h);
-            if (ratio <= 0) ratio = 1;
-
-            var resizedW = Math.max(1, Math.round(w * ratio));
-            var resizedH = Math.max(1, Math.round(h * ratio));
-            dup.resizeImage(UnitValue(resizedW, "px"), UnitValue(resizedH, "px"), null, ResampleMethod.BICUBIC);
-            dup.resizeCanvas(UnitValue(target, "px"), UnitValue(target, "px"), AnchorPosition.MIDDLECENTER);
-
-            app.preferences.rulerUnits = originalUnits;
-
-            var pngOptions = new PNGSaveOptions();
-            dup.saveAs(outFile, pngOptions, true);
-            dup.close(SaveOptions.DONOTSAVECHANGES);
-            dup = null;
-
             metaFile.encoding = "UTF8";
             metaFile.open("w");
-            metaFile.write(srcToken);
+            metaFile.write(token);
             metaFile.close();
-        } catch (e) {
-            try { if (src) src.close(SaveOptions.DONOTSAVECHANGES); } catch (e2) {}
-            try { if (dup) dup.close(SaveOptions.DONOTSAVECHANGES); } catch (e3) {}
-            throw e;
-        } finally {
-            try { app.activeDocument = originalDoc; } catch (e4) {}
-        }
-
-        return outFile;
+        } catch (e) {}
     }
 
-    
     function getPreviewTargetSize() {
         return 512;
     }
@@ -218,41 +173,119 @@ app.bringToFront();
         return size;
     }
 
-    function warmPreviewCache() {
-        if (!state.sourceFolder) return;
+    function cachedPreviewFileFor(item) {
         ensureCacheFolder();
-        var total = 0;
-        for (var i = 0; i < state.items.length; i++) {
-            if (isPsd(state.items[i].fileName)) total++;
-        }
-        if (!total) return;
-
-        var done = 0;
-        for (var j = 0; j < state.items.length; j++) {
-            var item = state.items[j];
-            if (!isPsd(item.fileName)) continue;
-            try {
-                var file = new File(state.sourceFolder.fsName + "/" + item.path);
-                if (file.exists) generatePsdPreview(file, item);
-            } catch (e) {}
-            done++;
-            setStatus("Building previews " + done + "/" + total + "...");
-        }
-        setStatus("Preview cache ready.");
+        return new File(CACHE_FOLDER.fsName + "/base_" + simpleHash(cacheKeyFor(item)) + ".png");
     }
 
-    function getOrCreateGroup(doc, groupName) {
-        for (var i = 0; i < doc.layerSets.length; i++) {
-            if (doc.layerSets[i].name.toLowerCase() === groupName.toLowerCase()) {
-                return doc.layerSets[i];
-            }
-        }
-        var g = doc.layerSets.add();
-        g.name = groupName;
-        return g;
+    function displayPreviewFileFor(item) {
+        ensureCacheFolder();
+        return new File(CACHE_FOLDER.fsName + "/display_" + simpleHash(cacheKeyFor(item) + "|" + state.previewZoom) + ".png");
     }
 
-function refreshPreviewPane() {
+    function generatePsdPreview(file, item) {
+        var outFile = cachedPreviewFileFor(item);
+        var metaFile = new File(outFile.fsName + ".meta");
+        var srcToken = sourceMtimeToken(file) + "|base_v6";
+
+        if (outFile.exists && readCacheMeta(metaFile) === srcToken) {
+            return outFile;
+        }
+
+        var originalDoc = app.activeDocument;
+        var src = null;
+        var dup = null;
+
+        try {
+            src = app.open(file);
+            setAllLayersVisible(src);
+            dup = src.duplicate(item.name + "_preview", true);
+            src.close(SaveOptions.DONOTSAVECHANGES);
+            src = null;
+
+            app.activeDocument = dup;
+            setAllLayersVisible(dup);
+            dup.flatten();
+
+            var originalUnits = app.preferences.rulerUnits;
+            app.preferences.rulerUnits = Units.PIXELS;
+
+            var target = getPreviewTargetSize();
+            var w = dup.width.as("px");
+            var h = dup.height.as("px");
+            var ratio = w > h ? (target / w) : (target / h);
+            if (ratio <= 0) ratio = 1;
+
+            dup.resizeImage(UnitValue(Math.max(1, Math.round(w * ratio)), "px"), UnitValue(Math.max(1, Math.round(h * ratio)), "px"), null, ResampleMethod.BICUBIC);
+            dup.resizeCanvas(UnitValue(target, "px"), UnitValue(target, "px"), AnchorPosition.MIDDLECENTER);
+
+            app.preferences.rulerUnits = originalUnits;
+
+            var pngOptions = new PNGSaveOptions();
+            dup.saveAs(outFile, pngOptions, true);
+            dup.close(SaveOptions.DONOTSAVECHANGES);
+            dup = null;
+
+            writeCacheMeta(metaFile, srcToken);
+        } catch (e) {
+            try { if (src) src.close(SaveOptions.DONOTSAVECHANGES); } catch (e2) {}
+            try { if (dup) dup.close(SaveOptions.DONOTSAVECHANGES); } catch (e3) {}
+            throw e;
+        } finally {
+            try { app.activeDocument = originalDoc; } catch (e4) {}
+        }
+
+        return outFile;
+    }
+
+    function buildDisplayPreview(baseFile, item) {
+        var outFile = displayPreviewFileFor(item);
+        var metaFile = new File(outFile.fsName + ".meta");
+        var token = sourceMtimeToken(baseFile) + "|z" + state.previewZoom;
+
+        if (outFile.exists && readCacheMeta(metaFile) === token) {
+            return outFile;
+        }
+
+        var originalDoc = app.activeDocument;
+        var doc = null;
+        try {
+            doc = app.open(baseFile);
+            app.activeDocument = doc;
+            doc.flatten();
+
+            var originalUnits = app.preferences.rulerUnits;
+            app.preferences.rulerUnits = Units.PIXELS;
+            var size = getPreviewDisplaySize();
+            doc.resizeImage(UnitValue(size, "px"), UnitValue(size, "px"), null, ResampleMethod.BICUBIC);
+            app.preferences.rulerUnits = originalUnits;
+
+            var pngOptions = new PNGSaveOptions();
+            doc.saveAs(outFile, pngOptions, true);
+            doc.close(SaveOptions.DONOTSAVECHANGES);
+            doc = null;
+
+            writeCacheMeta(metaFile, token);
+        } catch (e) {
+            try { if (doc) doc.close(SaveOptions.DONOTSAVECHANGES); } catch (e2) {}
+            throw e;
+        } finally {
+            try { app.activeDocument = originalDoc; } catch (e3) {}
+        }
+
+        return outFile;
+    }
+
+    function invalidateThumbnailCache(item) {
+        try {
+            var base = cachedPreviewFileFor(item);
+            var baseMeta = new File(base.fsName + ".meta");
+            if (base.exists) base.remove();
+            if (baseMeta.exists) baseMeta.remove();
+        } catch (e) {}
+    }
+
+    function refreshPreviewPane() {
         var item = listSelectionItem();
         if (!item || !state.sourceFolder) {
             previewImage.image = null;
@@ -269,13 +302,15 @@ function refreshPreviewPane() {
 
         try {
             if (isPreviewableImage(file.name)) {
-                setPreviewImageFromFile(file);
+                var displayImg = buildDisplayPreview(file, item);
+                setPreviewImageFromFile(displayImg);
                 return;
             }
 
             if (isPsd(file.name)) {
-                var cached = generatePsdPreview(file, item);
-                setPreviewImageFromFile(cached);
+                var cachedBase = generatePsdPreview(file, item);
+                var display = buildDisplayPreview(cachedBase, item);
+                setPreviewImageFromFile(display);
                 return;
             }
 
@@ -292,17 +327,12 @@ function refreshPreviewPane() {
         categoryDropdown.add("item", "all");
 
         var cats = {};
-        for (var i = 0; i < state.items.length; i++) {
-            cats[state.items[i].category || "default"] = true;
-        }
+        for (var i = 0; i < state.items.length; i++) cats[state.items[i].category || "default"] = true;
 
         var names = [];
         for (var k in cats) names.push(k);
         names.sort();
-
-        for (var j = 0; j < names.length; j++) {
-            categoryDropdown.add("item", names[j]);
-        }
+        for (var j = 0; j < names.length; j++) categoryDropdown.add("item", names[j]);
 
         var found = false;
         for (var n = 0; n < categoryDropdown.items.length; n++) {
@@ -335,9 +365,7 @@ function refreshPreviewPane() {
             }
         }
 
-        if (state.filteredItems.length) {
-            list.selection = 0;
-        }
+        if (state.filteredItems.length) list.selection = 0;
         refreshPreviewPane();
         setStatus(state.filteredItems.length ? (state.filteredItems.length + " item(s) visible.") : "No matching assets.");
     }
@@ -365,6 +393,15 @@ function refreshPreviewPane() {
         state.activePreview = null;
     }
 
+    function getOrCreateGroup(doc, groupName) {
+        for (var i = 0; i < doc.layerSets.length; i++) {
+            if (doc.layerSets[i].name.toLowerCase() === groupName.toLowerCase()) return doc.layerSets[i];
+        }
+        var g = doc.layerSets.add();
+        g.name = groupName;
+        return g;
+    }
+
     function placeInternal(item, previewOnly) {
         var targetDoc = app.activeDocument;
         var docSize = getDocSizePx(targetDoc);
@@ -376,6 +413,10 @@ function refreshPreviewPane() {
         if (!file.exists) throw new Error("Asset missing: " + file.fsName);
 
         var src = app.open(file);
+        if (isPsd(item.fileName)) {
+            setAllLayersVisible(src);
+            src.flatten();
+        }
         src.activeLayer.name = item.name;
         src.activeLayer.duplicate(targetDoc, ElementPlacement.PLACEATBEGINNING);
         src.close(SaveOptions.DONOTSAVECHANGES);
@@ -436,6 +477,27 @@ function refreshPreviewPane() {
         return false;
     }
 
+    function warmPreviewCache() {
+        if (!state.sourceFolder) return;
+        ensureCacheFolder();
+        var total = 0;
+        for (var i = 0; i < state.items.length; i++) if (isPsd(state.items[i].fileName)) total++;
+        if (!total) return;
+
+        var done = 0;
+        for (var j = 0; j < state.items.length; j++) {
+            var item = state.items[j];
+            if (!isPsd(item.fileName)) continue;
+            try {
+                var file = new File(state.sourceFolder.fsName + "/" + item.path);
+                if (file.exists) generatePsdPreview(file, item);
+            } catch (e) {}
+            done++;
+            setStatus("Building previews " + done + "/" + total + "...");
+        }
+        setStatus("Preview cache ready.");
+    }
+
     function loadFolderByPath(path) {
         var folder = new Folder(path);
         if (!folder.exists) return false;
@@ -458,7 +520,7 @@ function refreshPreviewPane() {
     var searchGroup = w.add("group");
     searchGroup.add("statictext", undefined, "Search:");
     var searchInput = searchGroup.add("edittext", undefined, "");
-    searchInput.characters = 28;
+    searchInput.characters = 24;
     searchGroup.add("statictext", undefined, "Folder:");
     var categoryDropdown = searchGroup.add("dropdownlist", undefined, []);
     categoryDropdown.preferredSize = [130, 24];
@@ -476,7 +538,7 @@ function refreshPreviewPane() {
     var previewPanel = body.add("panel", undefined, "Thumbnail");
     previewPanel.orientation = "column";
     previewPanel.alignChildren = ["center", "top"];
-    previewPanel.preferredSize = [280, 340];
+    previewPanel.preferredSize = [320, 420];
     var previewImage = previewPanel.add("image", undefined, undefined);
     previewImage.preferredSize = [240, 240];
     var previewLabel = previewPanel.add("statictext", undefined, "Select an asset", { multiline: true });
@@ -486,6 +548,7 @@ function refreshPreviewPane() {
     var previewBtn = actions.add("button", undefined, "Preview On Document");
     var placeBtn = actions.add("button", undefined, "Place Selected");
     var clearPreviewBtn = actions.add("button", undefined, "Clear Preview");
+    var rebuildThumbBtn = actions.add("button", undefined, "Rebuild Thumb");
     var closeBtn = actions.add("button", undefined, "Close Tool");
 
     var statusText = w.add("statictext", undefined, "Choose source folder to begin.");
@@ -539,6 +602,19 @@ function refreshPreviewPane() {
         try {
             clearPreviewLayer();
             setStatus("Preview cleared.");
+        } catch (e) {
+            setStatus("Error: " + e.message);
+        }
+    };
+
+    rebuildThumbBtn.onClick = function () {
+        try {
+            var item = getSelectedItem();
+            if (isPsd(item.fileName)) {
+                invalidateThumbnailCache(item);
+            }
+            refreshPreviewPane();
+            setStatus("Thumbnail rebuilt for " + item.name + ".");
         } catch (e) {
             setStatus("Error: " + e.message);
         }
