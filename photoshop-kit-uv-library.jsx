@@ -44,6 +44,10 @@ app.bringToFront();
         return /\.(png|jpg|jpeg|psd|tif|tiff)$/i.test(name);
     }
 
+    function isPreviewable(name) {
+        return /\.(png|jpg|jpeg)$/i.test(name);
+    }
+
     function normalizePath(path) {
         return path.replace(/\\/g, "/");
     }
@@ -68,6 +72,31 @@ app.bringToFront();
         }
     }
 
+    function refreshPreview(item) {
+        if (!item || !state.sourceFolder) {
+            previewPanel.visible = false;
+            return;
+        }
+
+        var file = new File(state.sourceFolder.fsName + "/" + item.path);
+        if (!file.exists || !isPreviewable(file.name)) {
+            previewText.text = "No preview for this file type.";
+            previewImage.image = null;
+            previewPanel.visible = true;
+            return;
+        }
+
+        try {
+            previewImage.image = ScriptUI.newImage(file);
+            previewText.text = item.name + " (" + item.category + ")";
+            previewPanel.visible = true;
+        } catch (e) {
+            previewText.text = "Preview failed: " + e.message;
+            previewImage.image = null;
+            previewPanel.visible = true;
+        }
+    }
+
     function refreshList() {
         list.removeAll();
         if (!state.sourceFolder) {
@@ -86,11 +115,14 @@ app.bringToFront();
             }
         }
 
-        setStatus(state.filteredItems.length ? (state.filteredItems.length + " item(s) visible.") : "No matching assets.");
-    }
+        if (state.filteredItems.length) {
+            list.selection = 0;
+            refreshPreview(state.filteredItems[0]);
+        } else {
+            refreshPreview(null);
+        }
 
-    function buildFileFromRelative(rootFolder, relPath) {
-        return new File(rootFolder.fsName + "/" + relPath);
+        setStatus(state.filteredItems.length ? (state.filteredItems.length + " item(s) visible.") : "No matching assets.");
     }
 
     function placeItem(item) {
@@ -105,7 +137,7 @@ app.bringToFront();
         var w = asNumber(slot.width, 1000) * scaleX;
         var h = asNumber(slot.height, 1000) * scaleY;
 
-        var file = buildFileFromRelative(state.sourceFolder, item.path);
+        var file = new File(state.sourceFolder.fsName + "/" + item.path);
         if (!file.exists) {
             throw new Error("Asset missing: " + file.fsName);
         }
@@ -148,10 +180,26 @@ app.bringToFront();
     var searchInput = searchGroup.add("edittext", undefined, "");
     searchInput.characters = 40;
 
-    var list = w.add("listbox", undefined, [], { multiselect: false });
-    list.preferredSize = [620, 280];
+    var bodyGroup = w.add("group");
+    bodyGroup.orientation = "row";
+    bodyGroup.alignChildren = ["fill", "fill"];
 
-    var placeBtn = w.add("button", undefined, "Place Selected");
+    var list = bodyGroup.add("listbox", undefined, [], { multiselect: false });
+    list.preferredSize = [450, 280];
+
+    var previewPanel = bodyGroup.add("panel", undefined, "Preview");
+    previewPanel.orientation = "column";
+    previewPanel.alignChildren = ["fill", "top"];
+    previewPanel.preferredSize = [240, 280];
+    var previewImage = previewPanel.add("image", undefined, undefined);
+    previewImage.preferredSize = [220, 220];
+    var previewText = previewPanel.add("statictext", undefined, "Select an asset");
+
+    var actions = w.add("group");
+    actions.orientation = "row";
+    var placeBtn = actions.add("button", undefined, "Place Selected");
+    var closeBtn = actions.add("button", undefined, "Close Tool");
+
     var statusText = w.add("statictext", undefined, "Choose source folder to begin.");
 
     chooseBtn.onClick = function () {
@@ -167,6 +215,11 @@ app.bringToFront();
 
     searchInput.onChanging = refreshList;
 
+    list.onChange = function () {
+        if (!list.selection) return;
+        refreshPreview(state.filteredItems[list.selection.index]);
+    };
+
     placeBtn.onClick = function () {
         try {
             if (!state.sourceFolder) throw new Error("Choose source folder first.");
@@ -177,6 +230,14 @@ app.bringToFront();
         } catch (e) {
             setStatus("Error: " + e.message);
         }
+    };
+
+    closeBtn.onClick = function () {
+        w.close();
+    };
+
+    w.onClose = function () {
+        return true;
     };
 
     w.center();

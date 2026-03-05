@@ -1,5 +1,7 @@
 const { app, action, core } = require("photoshop");
-const fs = require("uxp").storage.localFileSystem;
+const uxp = require("uxp");
+const fs = uxp.storage.localFileSystem;
+const formats = uxp.storage.formats;
 
 const REFERENCE_UV = { width: 4096, height: 4096 };
 const UV_PRESETS = {
@@ -21,9 +23,6 @@ const listEl = document.getElementById("assetList");
 const searchInput = document.getElementById("searchInput");
 const sourceMeta = document.getElementById("sourceMeta");
 
-document.getElementById("chooseSourceFolderBtn").addEventListener("click", chooseSourceFolder);
-searchInput.addEventListener("input", renderItems);
-
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
   statusEl.classList.toggle("error", isError);
@@ -33,17 +32,49 @@ function isAssetFile(name) {
   return /\.(png|jpg|jpeg|psd|tif|tiff)$/i.test(name);
 }
 
+function isPreviewable(name) {
+  return /\.(png|jpg|jpeg)$/i.test(name);
+}
+
+function base64FromUint8(uint8) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < uint8.length; i += chunkSize) {
+    const chunk = uint8.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+async function buildPreviewDataUrl(file, fileName) {
+  if (!isPreviewable(fileName)) {
+    return null;
+  }
+
+  try {
+    const bytes = await file.read({ format: formats.binary });
+    const mime = fileName.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+    return `data:${mime};base64,${base64FromUint8(bytes)}`;
+  } catch {
+    return null;
+  }
+}
+
 async function scanFolder(folder, parentPath = "", category = null, depth = 0) {
   const out = [];
   const entries = await folder.getEntries();
 
   for (const entry of entries) {
     const rel = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+
     if (entry.isFile && isAssetFile(entry.name)) {
       out.push({
         name: entry.name.replace(/\.[^.]+$/, ""),
+        fileName: entry.name,
         path: rel,
-        category: (category || "default").toLowerCase()
+        entry,
+        category: (category || "default").toLowerCase(),
+        thumbnail: await buildPreviewDataUrl(entry, entry.name)
       });
     }
 
@@ -62,6 +93,7 @@ async function chooseSourceFolder() {
     if (!folder) return;
 
     state.sourceFolder = folder;
+    setStatus("Scanning folder and generating previews...");
     state.items = await scanFolder(folder);
 
     sourceMeta.textContent = `Source: ${folder.name} (${state.items.length} assets)`;
@@ -95,10 +127,20 @@ function renderItems() {
     const preset = UV_PRESETS[item.category] || UV_PRESETS.default;
     const row = document.createElement("article");
     row.className = "item";
+
+    const thumb = item.thumbnail
+      ? `<img class="thumb" src="${item.thumbnail}" alt="${item.name}" />`
+      : `<div class="thumb thumb-placeholder">No preview</div>`;
+
     row.innerHTML = `
-      <div class="item-title">${item.name}</div>
-      <div class="meta">${item.path}</div>
-      <div class="meta">Category: ${item.category} · UV slot ${preset.x},${preset.y},${preset.width},${preset.height}</div>
+      <div class="item-layout">
+        ${thumb}
+        <div>
+          <div class="item-title">${item.name}</div>
+          <div class="meta">${item.path}</div>
+          <div class="meta">Category: ${item.category} · UV slot ${preset.x},${preset.y},${preset.width},${preset.height}</div>
+        </div>
+      </div>
     `;
 
     const button = document.createElement("button");
@@ -123,17 +165,6 @@ async function getActiveDocumentPixels() {
   return { width: widthResult.width._value, height: heightResult.height._value };
 }
 
-async function getEntryByPath(rootFolder, relativePath) {
-  const parts = relativePath.split("/").filter(Boolean);
-  let current = rootFolder;
-
-  for (let i = 0; i < parts.length; i++) {
-    current = await current.getEntry(parts[i]);
-  }
-
-  return current;
-}
-
 async function placeItem(item) {
   if (!state.sourceFolder) {
     setStatus("Choose a source folder first.", true);
@@ -141,8 +172,7 @@ async function placeItem(item) {
   }
 
   try {
-    const file = await getEntryByPath(state.sourceFolder, item.path);
-    const token = await fs.createSessionToken(file);
+    const token = await fs.createSessionToken(item.entry);
 
     await core.executeAsModal(async () => {
       const doc = await getActiveDocumentPixels();
@@ -174,5 +204,8 @@ async function placeItem(item) {
     setStatus(`Place failed: ${error.message}`, true);
   }
 }
+
+document.getElementById("chooseSourceFolderBtn").addEventListener("click", chooseSourceFolder);
+searchInput.addEventListener("input", renderItems);
 
 renderItems();

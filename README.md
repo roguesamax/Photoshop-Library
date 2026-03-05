@@ -17,6 +17,13 @@ KitAssets/
 
 Each top-level subfolder is treated as an element category, and assets are placed into that category's UV slot.
 
+## New usability improvements
+
+- **Close button added in the JSX tool** (`Close Tool`) so the modal window can be exited explicitly.
+- **Thumbnail previews added**:
+  - UXP panel shows inline image thumbnails for PNG/JPG/JPEG files.
+  - JSX script shows a preview panel when an item is selected (PNG/JPG/JPEG).
+
 ## Option A: UXP panel (dark mode)
 
 Files:
@@ -41,7 +48,8 @@ File:
 2. File → Scripts → Browse...
 3. Select `photoshop-kit-uv-library.jsx`.
 4. Click **Choose Source Folder**.
-5. Select/Place assets.
+5. Select an item to see preview.
+6. Click **Place Selected** or **Close Tool**.
 
 ## UV slot presets
 
@@ -50,5 +58,3 @@ Category-to-UV slots are currently defined in code:
 - JSX: `photoshop-kit-uv-library.jsx` → `UV_PRESETS`
 
 Reference UV size is `4096 x 4096`; placement scales to the current PSD size.
-
-If you want, I can next add a small "Edit UV slots" UI so you can adjust Collars/Shorts/Sleeves positions without editing code.
