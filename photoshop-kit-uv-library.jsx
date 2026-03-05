@@ -163,7 +163,7 @@ app.bringToFront();
     }
 
     function getPreviewTargetSize() {
-        return 512;
+        return 768;
     }
 
     function getPreviewDisplaySize() {
@@ -178,9 +178,12 @@ app.bringToFront();
         return new File(CACHE_FOLDER.fsName + "/base_" + simpleHash(cacheKeyFor(item)) + ".png");
     }
 
-    function displayPreviewFileFor(item) {
-        ensureCacheFolder();
-        return new File(CACHE_FOLDER.fsName + "/display_" + simpleHash(cacheKeyFor(item) + "|" + state.previewZoom) + ".png");
+    function ensureTransparentBackground(doc) {
+        try {
+            if (doc.backgroundLayer) {
+                doc.backgroundLayer.isBackgroundLayer = false;
+            }
+        } catch (e) {}
     }
 
     function generatePsdPreview(file, item) {
@@ -205,7 +208,8 @@ app.bringToFront();
 
             app.activeDocument = dup;
             setAllLayersVisible(dup);
-            dup.flatten();
+            ensureTransparentBackground(dup);
+            try { dup.mergeVisibleLayers(); } catch (e0) {}
 
             var originalUnits = app.preferences.rulerUnits;
             app.preferences.rulerUnits = Units.PIXELS;
@@ -217,7 +221,6 @@ app.bringToFront();
             if (ratio <= 0) ratio = 1;
 
             dup.resizeImage(UnitValue(Math.max(1, Math.round(w * ratio)), "px"), UnitValue(Math.max(1, Math.round(h * ratio)), "px"), null, ResampleMethod.BICUBIC);
-            dup.resizeCanvas(UnitValue(target, "px"), UnitValue(target, "px"), AnchorPosition.MIDDLECENTER);
 
             app.preferences.rulerUnits = originalUnits;
 
@@ -233,44 +236,6 @@ app.bringToFront();
             throw e;
         } finally {
             try { app.activeDocument = originalDoc; } catch (e4) {}
-        }
-
-        return outFile;
-    }
-
-    function buildDisplayPreview(baseFile, item) {
-        var outFile = displayPreviewFileFor(item);
-        var metaFile = new File(outFile.fsName + ".meta");
-        var token = sourceMtimeToken(baseFile) + "|z" + state.previewZoom;
-
-        if (outFile.exists && readCacheMeta(metaFile) === token) {
-            return outFile;
-        }
-
-        var originalDoc = app.activeDocument;
-        var doc = null;
-        try {
-            doc = app.open(baseFile);
-            app.activeDocument = doc;
-            doc.flatten();
-
-            var originalUnits = app.preferences.rulerUnits;
-            app.preferences.rulerUnits = Units.PIXELS;
-            var size = getPreviewDisplaySize();
-            doc.resizeImage(UnitValue(size, "px"), UnitValue(size, "px"), null, ResampleMethod.BICUBIC);
-            app.preferences.rulerUnits = originalUnits;
-
-            var pngOptions = new PNGSaveOptions();
-            doc.saveAs(outFile, pngOptions, true);
-            doc.close(SaveOptions.DONOTSAVECHANGES);
-            doc = null;
-
-            writeCacheMeta(metaFile, token);
-        } catch (e) {
-            try { if (doc) doc.close(SaveOptions.DONOTSAVECHANGES); } catch (e2) {}
-            throw e;
-        } finally {
-            try { app.activeDocument = originalDoc; } catch (e3) {}
         }
 
         return outFile;
@@ -302,15 +267,13 @@ app.bringToFront();
 
         try {
             if (isPreviewableImage(file.name)) {
-                var displayImg = buildDisplayPreview(file, item);
-                setPreviewImageFromFile(displayImg);
+                setPreviewImageFromFile(file);
                 return;
             }
 
             if (isPsd(file.name)) {
                 var cachedBase = generatePsdPreview(file, item);
-                var display = buildDisplayPreview(cachedBase, item);
-                setPreviewImageFromFile(display);
+                setPreviewImageFromFile(cachedBase);
                 return;
             }
 
@@ -415,7 +378,8 @@ app.bringToFront();
         var src = app.open(file);
         if (isPsd(item.fileName)) {
             setAllLayersVisible(src);
-            src.flatten();
+            ensureTransparentBackground(src);
+            try { src.mergeVisibleLayers(); } catch (e1) {}
         }
         src.activeLayer.name = item.name;
         src.activeLayer.duplicate(targetDoc, ElementPlacement.PLACEATBEGINNING);
@@ -579,7 +543,6 @@ app.bringToFront();
         var size = getPreviewDisplaySize();
         previewImage.preferredSize = [size, size];
         previewLabel.preferredSize = [size, 70];
-        refreshPreviewPane();
         w.layout.layout(true);
     };
 
