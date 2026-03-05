@@ -18,7 +18,7 @@ Top-level subfolder names are used as categories.
 ## What is fixed in this version
 
 - **Script tool now has an in-window thumbnail preview panel** (not just file names).
-- For PSD assets, the script generates a small cached JPG thumbnail (in temp cache) so browsing collars is visual and fast after first preview.
+- For PSD assets, the script generates a cached PNG thumbnail in user data cache (with source modified-time tracking) so browsing collars is visual and fast after first preview.
 - **Preview cleanup is automatic**: old preview layers are removed before a new preview.
 - **Final place no longer keeps preview layers**.
 - If the selected item is already previewed, `Place Selected` finalizes that exact preview layer (same position), instead of re-placing and shifting.

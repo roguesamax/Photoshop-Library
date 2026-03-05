@@ -18,7 +18,7 @@ app.bringToFront();
     };
 
     var PREVIEW_LAYER_PREFIX = "__KIT_PREVIEW__";
-    var CACHE_FOLDER = new Folder(Folder.temp.fsName + "/kit_uv_preview_cache");
+    var CACHE_FOLDER = new Folder(Folder.userData.fsName + "/kit_uv_preview_cache");
     var SETTINGS_FILE = new File(Folder.userData.fsName + "/kit_uv_last_source.txt");
 
     var state = {
@@ -116,15 +116,64 @@ app.bringToFront();
         return safe;
     }
 
+    function simpleHash(text) {
+        var h = 5381;
+        for (var i = 0; i < text.length; i++) {
+            h = ((h << 5) + h) + text.charCodeAt(i);
+            h = h & 0x7fffffff;
+        }
+        return String(h);
+    }
+
+    function cacheKeyFor(item) {
+        return normalizePath(state.sourceFolder.fsName + "/" + item.path);
+    }
+
     function cachedPreviewFileFor(item) {
         ensureCacheFolder();
-        var safe = sanitizeCacheName(item.path);
-        return new File(CACHE_FOLDER.fsName + "/" + safe + ".jpg");
+        var key = cacheKeyFor(item);
+        var hash = simpleHash(key);
+        return new File(CACHE_FOLDER.fsName + "/" + hash + ".png");
+    }
+
+    function sourceMtimeToken(file) {
+        try {
+            return file.modified ? String(file.modified.getTime()) : "0";
+        } catch (e) {
+            return "0";
+        }
+    }
+
+    function writeCacheMeta(metaFile, sourceFile) {
+        try {
+            metaFile.encoding = "UTF8";
+            metaFile.open("w");
+            metaFile.write(sourceMtimeToken(sourceFile));
+            metaFile.close();
+        } catch (e) {}
+    }
+
+    function readCacheMeta(metaFile) {
+        try {
+            if (!metaFile.exists) return "";
+            metaFile.encoding = "UTF8";
+            metaFile.open("r");
+            var v = metaFile.read();
+            metaFile.close();
+            return v || "";
+        } catch (e) {
+            return "";
+        }
     }
 
     function generatePsdPreview(file, item) {
         var outFile = cachedPreviewFileFor(item);
-        if (outFile.exists) return outFile;
+        var metaFile = new File(outFile.fsName + ".meta");
+        var srcToken = sourceMtimeToken(file);
+
+        if (outFile.exists && readCacheMeta(metaFile) === srcToken) {
+            return outFile;
+        }
 
         var src = app.open(file);
         var dup = src.duplicate(item.name + "_preview", true);
@@ -144,11 +193,11 @@ app.bringToFront();
         }
         app.preferences.rulerUnits = original;
 
-        var jpgOptions = new JPEGSaveOptions();
-        jpgOptions.quality = 6;
-        dup.saveAs(outFile, jpgOptions, true);
+        var pngOptions = new PNGSaveOptions();
+        dup.saveAs(outFile, pngOptions, true);
         dup.close(SaveOptions.DONOTSAVECHANGES);
 
+        writeCacheMeta(metaFile, file);
         return outFile;
     }
 
