@@ -19,7 +19,8 @@ const SOURCE_FOLDER_TOKEN_KEY = "kitUVSourceFolderToken";
 const state = {
   sourceFolder: null,
   items: [],
-  activePreview: null // {layerId, path}
+  activePreview: null, // {layerId, path}
+  selectedCategory: "all"
 };
 
 const statusEl = document.getElementById("status");
@@ -27,6 +28,7 @@ const listEl = document.getElementById("assetList");
 const searchInput = document.getElementById("searchInput");
 const sourceMeta = document.getElementById("sourceMeta");
 const clearPreviewBtn = document.getElementById("clearPreviewBtn");
+const categoryFilterEl = document.getElementById("categoryFilter");
 
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
@@ -88,6 +90,7 @@ async function setSourceFolder(folder, persist = true) {
   setStatus("Scanning folder...");
   state.items = await scanFolder(folder);
   sourceMeta.textContent = `Source: ${folder.name} (${state.items.length} assets)`;
+  updateCategoryFilterOptions();
   renderItems();
   setStatus("Source folder loaded.");
 
@@ -122,6 +125,29 @@ async function restoreSourceFolder() {
   }
 }
 
+
+function updateCategoryFilterOptions() {
+  const categories = Array.from(new Set(state.items.map((i) => i.category || "default"))).sort((a, b) => a.localeCompare(b));
+  categoryFilterEl.innerHTML = "";
+
+  const allOpt = document.createElement("option");
+  allOpt.value = "all";
+  allOpt.textContent = "All folders";
+  categoryFilterEl.appendChild(allOpt);
+
+  for (const cat of categories) {
+    const opt = document.createElement("option");
+    opt.value = cat;
+    opt.textContent = cat;
+    categoryFilterEl.appendChild(opt);
+  }
+
+  if (!["all", ...categories].includes(state.selectedCategory)) {
+    state.selectedCategory = "all";
+  }
+  categoryFilterEl.value = state.selectedCategory;
+}
+
 function renderItems() {
   listEl.innerHTML = "";
 
@@ -131,7 +157,11 @@ function renderItems() {
   }
 
   const query = searchInput.value.trim().toLowerCase();
-  const filtered = state.items.filter((item) => !query || item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query));
+  const filtered = state.items.filter((item) => {
+    const categoryOk = state.selectedCategory === "all" || item.category === state.selectedCategory;
+    const queryOk = !query || item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query);
+    return categoryOk && queryOk;
+  });
 
   if (!filtered.length) {
     listEl.innerHTML = '<div class="hint">No matching assets.</div>';
@@ -148,10 +178,16 @@ function renderItems() {
   const categories = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b));
 
   for (const category of categories) {
-    const heading = document.createElement("div");
-    heading.className = "category-heading";
-    heading.textContent = category;
-    listEl.appendChild(heading);
+    const group = document.createElement("details");
+    group.className = "category-group";
+    group.open = true;
+
+    const summary = document.createElement("summary");
+    summary.textContent = `${category} (${grouped.get(category).length})`;
+    group.appendChild(summary);
+
+    const body = document.createElement("div");
+    body.className = "category-items";
 
     const items = grouped.get(category).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -188,8 +224,11 @@ function renderItems() {
 
       actions.append(previewBtn, placeBtn);
       row.appendChild(actions);
-      listEl.appendChild(row);
+      body.appendChild(row);
     }
+
+    group.appendChild(body);
+    listEl.appendChild(group);
   }
 }
 
@@ -344,6 +383,10 @@ async function placeItem(item) {
 document.getElementById("chooseSourceFolderBtn").addEventListener("click", chooseSourceFolder);
 searchInput.addEventListener("input", renderItems);
 clearPreviewBtn.addEventListener("click", clearPreview);
+categoryFilterEl.addEventListener("change", () => {
+  state.selectedCategory = categoryFilterEl.value || "all";
+  renderItems();
+});
 
 renderItems();
 restoreSourceFolder();

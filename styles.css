@@ -83,7 +83,8 @@ button:hover {
   margin-bottom: 8px;
 }
 
-input {
+input,
+select {
   background: #11131a;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -185,11 +186,30 @@ footer.error {
 }
 
 
-.category-heading {
-  margin-top: 6px;
-  font-size: 12px;
+
+.category-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #12151d;
+  overflow: hidden;
+}
+
+.category-group summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 10px;
   font-weight: 700;
   text-transform: capitalize;
   color: var(--accent-strong);
-  padding: 2px 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.category-group[open] summary {
+  background: #171b24;
+}
+
+.category-items {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
 }

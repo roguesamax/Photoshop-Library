@@ -25,7 +25,8 @@ app.bringToFront();
         sourceFolder: null,
         items: [],
         filteredItems: [],
-        activePreview: null
+        activePreview: null,
+        selectedCategory: "all"
     };
 
     function setStatus(text) { statusText.text = text; }
@@ -105,17 +106,6 @@ app.bringToFront();
         }
     }
 
-    function sanitizeCacheName(pathText) {
-        var safe = pathText;
-        var bad = ["\\", "/", ":", "*", "?", '"', "<", ">", "|"];
-        for (var i = 0; i < bad.length; i++) {
-            while (safe.indexOf(bad[i]) !== -1) {
-                safe = safe.replace(bad[i], "_");
-            }
-        }
-        return safe;
-    }
-
     function simpleHash(text) {
         var h = 5381;
         for (var i = 0; i < text.length; i++) {
@@ -169,56 +159,60 @@ app.bringToFront();
     function generatePsdPreview(file, item) {
         var outFile = cachedPreviewFileFor(item);
         var metaFile = new File(outFile.fsName + ".meta");
-        var srcToken = sourceMtimeToken(file);
+        var srcToken = sourceMtimeToken(file) + "|v3";
 
         if (outFile.exists && readCacheMeta(metaFile) === srcToken) {
             return outFile;
         }
 
-        var src = app.open(file);
-        var dup = src.duplicate(item.name + "_preview", true);
-        src.close(SaveOptions.DONOTSAVECHANGES);
+        var originalDoc = app.activeDocument;
+        var src = null;
+        var dup = null;
 
-        app.activeDocument = dup;
-        dup.flatten();
+        try {
+            src = app.open(file);
+            dup = src.duplicate(item.name + "_preview", true);
+            src.close(SaveOptions.DONOTSAVECHANGES);
+            src = null;
 
-        var original = app.preferences.rulerUnits;
-        app.preferences.rulerUnits = Units.PIXELS;
+            app.activeDocument = dup;
+            dup.flatten();
 
-        var target = 240;
-        var w = dup.width.as("px");
-        var h = dup.height.as("px");
-        var ratio = w > h ? (target / w) : (target / h);
-        if (ratio <= 0) ratio = 1;
+            var originalUnits = app.preferences.rulerUnits;
+            app.preferences.rulerUnits = Units.PIXELS;
 
-        var resizedW = Math.max(1, Math.round(w * ratio));
-        var resizedH = Math.max(1, Math.round(h * ratio));
-        dup.resizeImage(UnitValue(resizedW, "px"), UnitValue(resizedH, "px"), null, ResampleMethod.BICUBIC);
+            var target = 240;
+            var w = dup.width.as("px");
+            var h = dup.height.as("px");
+            var ratio = w > h ? (target / w) : (target / h);
+            if (ratio <= 0) ratio = 1;
 
-        var canvas = app.documents.add(UnitValue(target, "px"), UnitValue(target, "px"), 72, "cacheThumb", NewDocumentMode.RGB, DocumentFill.TRANSPARENT);
-        dup.activeLayer.duplicate(canvas, ElementPlacement.PLACEATBEGINNING);
-        dup.close(SaveOptions.DONOTSAVECHANGES);
+            var resizedW = Math.max(1, Math.round(w * ratio));
+            var resizedH = Math.max(1, Math.round(h * ratio));
+            dup.resizeImage(UnitValue(resizedW, "px"), UnitValue(resizedH, "px"), null, ResampleMethod.BICUBIC);
+            dup.resizeCanvas(UnitValue(target, "px"), UnitValue(target, "px"), AnchorPosition.MIDDLECENTER);
 
-        app.activeDocument = canvas;
-        var layer = canvas.activeLayer;
-        var b = layer.bounds;
-        var left = b[0].as("px");
-        var top = b[1].as("px");
-        var right = b[2].as("px");
-        var bottom = b[3].as("px");
-        var cw = right - left;
-        var ch = bottom - top;
-        var tx = (target - cw) / 2 - left;
-        var ty = (target - ch) / 2 - top;
-        layer.translate(UnitValue(tx, "px"), UnitValue(ty, "px"));
+            app.preferences.rulerUnits = originalUnits;
 
-        app.preferences.rulerUnits = original;
+            var pngOptions = new PNGSaveOptions();
+            dup.saveAs(outFile, pngOptions, true);
+            dup.close(SaveOptions.DONOTSAVECHANGES);
+            dup = null;
 
-        var pngOptions = new PNGSaveOptions();
-        canvas.saveAs(outFile, pngOptions, true);
-        canvas.close(SaveOptions.DONOTSAVECHANGES);
+            writeCacheMeta(metaFile, { modified: { getTime: function () { return parseInt(srcToken, 10) || 0; } } });
+            // overwrite with full token explicitly
+            metaFile.encoding = "UTF8";
+            metaFile.open("w");
+            metaFile.write(srcToken);
+            metaFile.close();
+        } catch (e) {
+            try { if (src) src.close(SaveOptions.DONOTSAVECHANGES); } catch (e2) {}
+            try { if (dup) dup.close(SaveOptions.DONOTSAVECHANGES); } catch (e3) {}
+            throw e;
+        } finally {
+            try { app.activeDocument = originalDoc; } catch (e4) {}
+        }
 
-        writeCacheMeta(metaFile, file);
         return outFile;
     }
 
@@ -257,6 +251,37 @@ app.bringToFront();
         }
     }
 
+    function refreshCategoryDropdown() {
+        categoryDropdown.removeAll();
+        categoryDropdown.add("item", "all");
+
+        var cats = {};
+        for (var i = 0; i < state.items.length; i++) {
+            cats[state.items[i].category || "default"] = true;
+        }
+
+        var names = [];
+        for (var k in cats) names.push(k);
+        names.sort();
+
+        for (var j = 0; j < names.length; j++) {
+            categoryDropdown.add("item", names[j]);
+        }
+
+        var found = false;
+        for (var n = 0; n < categoryDropdown.items.length; n++) {
+            if (categoryDropdown.items[n].text === state.selectedCategory) {
+                categoryDropdown.selection = n;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            state.selectedCategory = "all";
+            categoryDropdown.selection = 0;
+        }
+    }
+
     function refreshList() {
         list.removeAll();
         if (!state.sourceFolder) return setStatus("Choose source folder first.");
@@ -266,9 +291,11 @@ app.bringToFront();
 
         for (var i = 0; i < state.items.length; i++) {
             var item = state.items[i];
-            if (!q || item.name.toLowerCase().indexOf(q) !== -1 || item.path.toLowerCase().indexOf(q) !== -1) {
+            var categoryOk = state.selectedCategory === "all" || item.category === state.selectedCategory;
+            var queryOk = !q || item.name.toLowerCase().indexOf(q) !== -1 || item.path.toLowerCase().indexOf(q) !== -1;
+            if (categoryOk && queryOk) {
                 state.filteredItems.push(item);
-                list.add("item", "[" + item.category + "] " + item.name + " (" + item.path + ")");
+                list.add("item", item.name + " (" + item.path + ")");
             }
         }
 
@@ -370,6 +397,7 @@ app.bringToFront();
         state.sourceFolder = folder;
         state.items = [];
         scanFolder(folder, "", null, 0, state.items);
+        refreshCategoryDropdown();
         refreshList();
         setStatus("Loaded " + state.items.length + " assets from saved folder.");
         return true;
@@ -384,7 +412,10 @@ app.bringToFront();
     var searchGroup = w.add("group");
     searchGroup.add("statictext", undefined, "Search:");
     var searchInput = searchGroup.add("edittext", undefined, "");
-    searchInput.characters = 42;
+    searchInput.characters = 28;
+    searchGroup.add("statictext", undefined, "Folder:");
+    var categoryDropdown = searchGroup.add("dropdownlist", undefined, []);
+    categoryDropdown.preferredSize = [160, 24];
 
     var body = w.add("group");
     body.orientation = "row";
@@ -415,12 +446,18 @@ app.bringToFront();
         state.sourceFolder = folder;
         state.items = [];
         scanFolder(folder, "", null, 0, state.items);
+        refreshCategoryDropdown();
         refreshList();
         saveLastFolderPath(folder.fsName);
         setStatus("Loaded " + state.items.length + " assets.");
     };
 
     searchInput.onChanging = refreshList;
+
+    categoryDropdown.onChange = function () {
+        state.selectedCategory = categoryDropdown.selection ? categoryDropdown.selection.text : "all";
+        refreshList();
+    };
 
     list.onChange = function () {
         refreshPreviewPane();

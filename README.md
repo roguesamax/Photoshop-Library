@@ -15,12 +15,14 @@ KitAssets/
 
 Top-level subfolder names are used as categories.
 
-Assets are grouped in the UI by these folder headings (e.g., `collars`, `shorts`, etc.) so each category is separated clearly.
+Assets are shown with folder separation controls:
+- UXP panel: each folder appears as its own collapsible dropdown section.
+- Script tool: a `Folder` dropdown filters the list by one folder at a time.
 
 ## What is fixed in this version
 
 - **Script tool now has an in-window thumbnail preview panel** (not just file names).
-- For PSD assets, the script generates a cached PNG thumbnail in user data cache (with source modified-time tracking) so browsing collars is visual and fast after first preview. Thumbnails are normalized to a larger square canvas so they fill the preview area better.
+- For PSD assets, the script generates a cached PNG thumbnail in user data cache (with source modified-time tracking) so browsing collars is visual and fast after first preview. Thumbnails are normalized to a larger square canvas so they fill the preview area better without affecting preview/place coordinates in the working PSD.
 - **Preview cleanup is automatic**: old preview layers are removed before a new preview.
 - **Final place no longer keeps preview layers**.
 - If the selected item is already previewed, `Place Selected` finalizes that exact preview layer (same position), instead of re-placing and shifting.
