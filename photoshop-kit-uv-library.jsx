@@ -105,9 +105,20 @@ app.bringToFront();
         }
     }
 
+    function sanitizeCacheName(pathText) {
+        var safe = pathText;
+        var bad = ["\\", "/", ":", "*", "?", '"', "<", ">", "|"];
+        for (var i = 0; i < bad.length; i++) {
+            while (safe.indexOf(bad[i]) !== -1) {
+                safe = safe.replace(bad[i], "_");
+            }
+        }
+        return safe;
+    }
+
     function cachedPreviewFileFor(item) {
         ensureCacheFolder();
-        var safe = item.path.replace(/[\\/:*?"<>|]/g, "_");
+        var safe = sanitizeCacheName(item.path);
         return new File(CACHE_FOLDER.fsName + "/" + safe + ".jpg");
     }
 
