@@ -134,15 +134,6 @@ app.bringToFront();
         }
     }
 
-    function writeCacheMeta(metaFile, sourceFile) {
-        try {
-            metaFile.encoding = "UTF8";
-            metaFile.open("w");
-            metaFile.write(sourceMtimeToken(sourceFile));
-            metaFile.close();
-        } catch (e) {}
-    }
-
     function readCacheMeta(metaFile) {
         try {
             if (!metaFile.exists) return "";
@@ -159,7 +150,7 @@ app.bringToFront();
     function generatePsdPreview(file, item) {
         var outFile = cachedPreviewFileFor(item);
         var metaFile = new File(outFile.fsName + ".meta");
-        var srcToken = sourceMtimeToken(file) + "|v3";
+        var srcToken = sourceMtimeToken(file) + "|v4";
 
         if (outFile.exists && readCacheMeta(metaFile) === srcToken) {
             return outFile;
@@ -199,8 +190,6 @@ app.bringToFront();
             dup.close(SaveOptions.DONOTSAVECHANGES);
             dup = null;
 
-            writeCacheMeta(metaFile, { modified: { getTime: function () { return parseInt(srcToken, 10) || 0; } } });
-            // overwrite with full token explicitly
             metaFile.encoding = "UTF8";
             metaFile.open("w");
             metaFile.write(srcToken);
