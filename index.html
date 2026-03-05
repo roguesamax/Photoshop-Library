@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KIT UV Library</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <h1>KIT UV Library</h1>
+        <p>Select one source folder. Subfolders (Collars, Shorts...) become your library.</p>
+      </header>
+
+      <section class="controls card">
+        <button id="chooseSourceFolderBtn">Choose Source Folder</button>
+        <div class="hint" id="sourceMeta">No source folder selected.</div>
+      </section>
+
+      <section class="card">
+        <div class="row">
+          <label for="searchInput">Search</label>
+          <input id="searchInput" type="text" placeholder="Collar, shorts, sponsor..." />
+        </div>
+        <div class="list" id="assetList"></div>
+      </section>
+
+      <section class="card">
+        <h2>Expected folder structure</h2>
+        <pre>KitAssets/
+  Collars/
+    collar-home.png
+    collar-away.png
+  Shorts/
+    shorts-home.png
+  Sleeves/
+    sleeve-left.png</pre>
+      </section>
+
+      <footer id="status">Ready.</footer>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
