@@ -14,8 +14,13 @@ const UV_PRESETS = {
 };
 
 const PREVIEW_LAYER_PREFIX = "__KIT_PREVIEW__";
+const SOURCE_FOLDER_TOKEN_KEY = "kitUVSourceFolderToken";
 
-const state = { sourceFolder: null, items: [] };
+const state = {
+  sourceFolder: null,
+  items: [],
+  activePreview: null // {layerId, path}
+};
 
 const statusEl = document.getElementById("status");
 const listEl = document.getElementById("assetList");
@@ -78,20 +83,42 @@ async function scanFolder(folder, parentPath = "", category = null, depth = 0) {
   return out;
 }
 
+async function setSourceFolder(folder, persist = true) {
+  state.sourceFolder = folder;
+  setStatus("Scanning folder...");
+  state.items = await scanFolder(folder);
+  sourceMeta.textContent = `Source: ${folder.name} (${state.items.length} assets)`;
+  renderItems();
+  setStatus("Source folder loaded.");
+
+  if (persist) {
+    const token = await fs.createPersistentToken(folder);
+    localStorage.setItem(SOURCE_FOLDER_TOKEN_KEY, token);
+  }
+}
+
 async function chooseSourceFolder() {
   try {
     const folder = await fs.getFolder();
     if (!folder) return;
-
-    state.sourceFolder = folder;
-    setStatus("Scanning folder...");
-    state.items = await scanFolder(folder);
-
-    sourceMeta.textContent = `Source: ${folder.name} (${state.items.length} assets)`;
-    renderItems();
-    setStatus("Source folder loaded.");
+    await setSourceFolder(folder, true);
   } catch (error) {
     setStatus(`Source folder failed: ${error.message}`, true);
+  }
+}
+
+async function restoreSourceFolder() {
+  const token = localStorage.getItem(SOURCE_FOLDER_TOKEN_KEY);
+  if (!token) return;
+
+  try {
+    const folder = await fs.getEntryForPersistentToken(token);
+    if (folder?.isFolder) {
+      await setSourceFolder(folder, false);
+      setStatus(`Restored source folder: ${folder.name}`);
+    }
+  } catch {
+    localStorage.removeItem(SOURCE_FOLDER_TOKEN_KEY);
   }
 }
 
@@ -167,9 +194,7 @@ async function collectPreviewLayerIds() {
       if (layer?.name && layer.name.startsWith(PREVIEW_LAYER_PREFIX) && layer.id) {
         result.push(layer.id);
       }
-      if (layer?.layers?.length) {
-        walk(layer.layers);
-      }
+      if (layer?.layers?.length) walk(layer.layers);
     }
   };
 
@@ -195,6 +220,7 @@ async function clearAllPreviewLayersUnsafe() {
       // continue
     }
   }
+  state.activePreview = null;
 }
 
 async function setLayerOpacity(layerId, opacity) {
@@ -205,25 +231,20 @@ async function setLayerOpacity(layerId, opacity) {
 }
 
 async function setLayerName(layerId, name) {
-  await action.batchPlay(
-    [{ _obj: "set", _target: [{ _ref: "layer", _id: layerId }], to: { _obj: "layer", name } }],
-    {}
-  );
+  await action.batchPlay([{ _obj: "set", _target: [{ _ref: "layer", _id: layerId }], to: { _obj: "layer", name } }], {});
 }
 
 async function placeRaw(item, isPreview = false) {
   const token = await fs.createSessionToken(item.entry);
 
   if (isPsd(item.fileName)) {
-    const [placed] = await action.batchPlay(
-      [{ _obj: "placeEvent", null: { _path: token, _kind: "local" }, linked: true }],
-      {}
-    );
+    const [placed] = await action.batchPlay([{ _obj: "placeEvent", null: { _path: token, _kind: "local" }, linked: true }], {});
     if (isPreview) {
       await setLayerName(placed.ID, `${PREVIEW_LAYER_PREFIX} ${item.name}`);
       await setLayerOpacity(placed.ID, 45);
+      state.activePreview = { layerId: placed.ID, path: item.path };
     }
-    return;
+    return placed.ID;
   }
 
   const doc = await getActiveDocumentPixels();
@@ -246,7 +267,18 @@ async function placeRaw(item, isPreview = false) {
   if (isPreview) {
     await setLayerName(placed.ID, `${PREVIEW_LAYER_PREFIX} ${item.name}`);
     await setLayerOpacity(placed.ID, 45);
+    state.activePreview = { layerId: placed.ID, path: item.path };
   }
+
+  return placed.ID;
+}
+
+async function finalizeActivePreview(item) {
+  if (!state.activePreview || state.activePreview.path !== item.path) return false;
+  await setLayerOpacity(state.activePreview.layerId, 100);
+  await setLayerName(state.activePreview.layerId, item.name);
+  state.activePreview = null;
+  return true;
 }
 
 async function clearPreview() {
@@ -279,8 +311,11 @@ async function placeItem(item) {
 
   try {
     await core.executeAsModal(async () => {
-      await clearAllPreviewLayersUnsafe();
-      await placeRaw(item, false);
+      const usedPreview = await finalizeActivePreview(item);
+      if (!usedPreview) {
+        await clearAllPreviewLayersUnsafe();
+        await placeRaw(item, false);
+      }
     }, { commandName: `Place ${item.name}` });
     setStatus(`Placed ${item.name}. Only final layer kept.`);
   } catch (error) {
@@ -293,3 +328,4 @@ searchInput.addEventListener("input", renderItems);
 clearPreviewBtn.addEventListener("click", clearPreview);
 
 renderItems();
+restoreSourceFolder();

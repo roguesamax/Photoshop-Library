@@ -15,31 +15,34 @@ KitAssets/
 
 Top-level subfolder names are used as categories.
 
-## Key behavior for PSD workflows
+## What is fixed in this version
 
-- You can now **preview selected assets directly on top of the active PSD** (semi-transparent overlay) while browsing options, and each new preview automatically clears the previous one.
-- This works for **PSD assets**, so users can scroll through variants (e.g., 5 collars) and visually confirm the correct one.
-- For PSD files, placement now uses **native PSD placement** (no UV preset resize or forced top-left move), so PSD assets keep their authored position/scale.
-- For non-PSD assets (PNG/JPG/TIFF), UV preset placement is still used.
+- **Script tool now has an in-window thumbnail preview panel** (not just file names).
+- For PSD assets, the script generates a small cached JPG thumbnail (in temp cache) so browsing collars is visual and fast after first preview.
+- **Preview cleanup is automatic**: old preview layers are removed before a new preview.
+- **Final place no longer keeps preview layers**.
+- If the selected item is already previewed, `Place Selected` finalizes that exact preview layer (same position), instead of re-placing and shifting.
+- **Source folder is remembered** between runs:
+  - UXP uses a persistent folder token.
+  - Script tool stores last folder path in user data.
 
 ## Option A: UXP panel (dark mode)
 
 1. Photoshop → Plugins → Development → Load Unpacked.
 2. Open **KIT UV Library** panel.
-3. Click **Choose Source Folder**.
+3. Choose source folder once (it will auto-restore next time if available).
 4. Use **Preview on document** to audition options.
-5. Click **Place in document** when correct.
-6. Use **Clear Preview Overlay** to remove temporary preview layers (or they clear automatically when previewing another option or placing final).
+5. Use **Place in document** to confirm final.
 
 ## Option B: No-login script route
 
 1. Open PSD.
 2. File → Scripts → Browse...
 3. Select `photoshop-kit-uv-library.jsx`.
-4. Choose source folder.
-5. Use **Preview Selected On Document** while browsing.
-6. Click **Place Selected** when final.
-7. **Close Tool** exits cleanly.
+4. Source folder auto-loads from previous run (if path still exists), or choose manually.
+5. Select asset in list to see thumbnail in the script window.
+6. Use **Preview On Document** while browsing.
+7. Click **Place Selected** when final.
 
 ## UV presets
 
