@@ -21,6 +21,10 @@ Assets are shown with folder separation controls:
 
 ## What is fixed in this version
 
+- **Zoom control in Script thumbnail pane** (`75%` to `200%`) to improve visibility while browsing.
+- **Automatic preview cache warm-up** in Script tool when source folder is loaded/restored (only regenerates changed PSD thumbnails using modified-time token).
+- **Category folder placement on final place** in Script tool: selected assets are moved into a layer group named after the source folder category (creates the group if missing).
+
 - **Script tool now has an in-window thumbnail preview panel** (not just file names).
 - For PSD assets, the script generates a cached PNG thumbnail in user data cache (with source modified-time tracking) so browsing collars is visual and fast after first preview. Thumbnails are normalized to a larger square canvas so they fill the preview area better without affecting preview/place coordinates in the working PSD.
 - **Preview cleanup is automatic**: old preview layers are removed before a new preview.

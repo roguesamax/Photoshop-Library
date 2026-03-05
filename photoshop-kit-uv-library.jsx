@@ -26,7 +26,8 @@ app.bringToFront();
         items: [],
         filteredItems: [],
         activePreview: null,
-        selectedCategory: "all"
+        selectedCategory: "all",
+        previewZoom: 100
     };
 
     function setStatus(text) { statusText.text = text; }
@@ -172,7 +173,7 @@ app.bringToFront();
             var originalUnits = app.preferences.rulerUnits;
             app.preferences.rulerUnits = Units.PIXELS;
 
-            var target = 240;
+            var target = getPreviewTargetSize();
             var w = dup.width.as("px");
             var h = dup.height.as("px");
             var ratio = w > h ? (target / w) : (target / h);
@@ -205,7 +206,53 @@ app.bringToFront();
         return outFile;
     }
 
-    function refreshPreviewPane() {
+    
+    function getPreviewTargetSize() {
+        return 512;
+    }
+
+    function getPreviewDisplaySize() {
+        var size = Math.round(240 * (state.previewZoom / 100));
+        if (size < 120) size = 120;
+        if (size > 420) size = 420;
+        return size;
+    }
+
+    function warmPreviewCache() {
+        if (!state.sourceFolder) return;
+        ensureCacheFolder();
+        var total = 0;
+        for (var i = 0; i < state.items.length; i++) {
+            if (isPsd(state.items[i].fileName)) total++;
+        }
+        if (!total) return;
+
+        var done = 0;
+        for (var j = 0; j < state.items.length; j++) {
+            var item = state.items[j];
+            if (!isPsd(item.fileName)) continue;
+            try {
+                var file = new File(state.sourceFolder.fsName + "/" + item.path);
+                if (file.exists) generatePsdPreview(file, item);
+            } catch (e) {}
+            done++;
+            setStatus("Building previews " + done + "/" + total + "...");
+        }
+        setStatus("Preview cache ready.");
+    }
+
+    function getOrCreateGroup(doc, groupName) {
+        for (var i = 0; i < doc.layerSets.length; i++) {
+            if (doc.layerSets[i].name.toLowerCase() === groupName.toLowerCase()) {
+                return doc.layerSets[i];
+            }
+        }
+        var g = doc.layerSets.add();
+        g.name = groupName;
+        return g;
+    }
+
+function refreshPreviewPane() {
         var item = listSelectionItem();
         if (!item || !state.sourceFolder) {
             previewImage.image = null;
@@ -362,6 +409,11 @@ app.bringToFront();
             layer.opacity = 45;
             layer.name = PREVIEW_LAYER_PREFIX + " " + item.name;
             state.activePreview = { name: item.name, path: item.path };
+        } else {
+            try {
+                var group = getOrCreateGroup(targetDoc, item.category || "default");
+                layer.move(group, ElementPlacement.INSIDE);
+            } catch (e) {}
         }
     }
 
@@ -373,6 +425,10 @@ app.bringToFront();
             if (lyr.name && lyr.name.indexOf(PREVIEW_LAYER_PREFIX + " " + item.name) === 0) {
                 lyr.opacity = 100;
                 lyr.name = item.name;
+                try {
+                    var group = getOrCreateGroup(doc, item.category || "default");
+                    lyr.move(group, ElementPlacement.INSIDE);
+                } catch (e2) {}
                 state.activePreview = null;
                 return true;
             }
@@ -389,6 +445,7 @@ app.bringToFront();
         refreshCategoryDropdown();
         refreshList();
         setStatus("Loaded " + state.items.length + " assets from saved folder.");
+        warmPreviewCache();
         return true;
     }
 
@@ -404,7 +461,11 @@ app.bringToFront();
     searchInput.characters = 28;
     searchGroup.add("statictext", undefined, "Folder:");
     var categoryDropdown = searchGroup.add("dropdownlist", undefined, []);
-    categoryDropdown.preferredSize = [160, 24];
+    categoryDropdown.preferredSize = [130, 24];
+    searchGroup.add("statictext", undefined, "Zoom:");
+    var zoomDropdown = searchGroup.add("dropdownlist", undefined, ["75%", "100%", "125%", "150%", "200%"]);
+    zoomDropdown.selection = 1;
+    zoomDropdown.preferredSize = [80, 24];
 
     var body = w.add("group");
     body.orientation = "row";
@@ -439,6 +500,7 @@ app.bringToFront();
         refreshList();
         saveLastFolderPath(folder.fsName);
         setStatus("Loaded " + state.items.length + " assets.");
+        warmPreviewCache();
     };
 
     searchInput.onChanging = refreshList;
@@ -446,6 +508,16 @@ app.bringToFront();
     categoryDropdown.onChange = function () {
         state.selectedCategory = categoryDropdown.selection ? categoryDropdown.selection.text : "all";
         refreshList();
+    };
+
+    zoomDropdown.onChange = function () {
+        var txt = zoomDropdown.selection ? zoomDropdown.selection.text : "100%";
+        state.previewZoom = parseInt(txt, 10) || 100;
+        var size = getPreviewDisplaySize();
+        previewImage.preferredSize = [size, size];
+        previewLabel.preferredSize = [size, 70];
+        refreshPreviewPane();
+        w.layout.layout(true);
     };
 
     list.onChange = function () {
