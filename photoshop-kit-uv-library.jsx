@@ -26,8 +26,7 @@ app.bringToFront();
         items: [],
         filteredItems: [],
         activePreview: null,
-        selectedCategory: "all",
-        previewZoom: 100
+        selectedCategory: "all"
     };
 
     function setStatus(text) { statusText.text = text; }
@@ -166,13 +165,6 @@ app.bringToFront();
         return 768;
     }
 
-    function getPreviewDisplaySize() {
-        var size = Math.round(240 * (state.previewZoom / 100));
-        if (size < 120) size = 120;
-        if (size > 420) size = 420;
-        return size;
-    }
-
     function cachedPreviewFileFor(item) {
         ensureCacheFolder();
         return new File(CACHE_FOLDER.fsName + "/base_" + simpleHash(cacheKeyFor(item)) + ".png");
@@ -189,7 +181,7 @@ app.bringToFront();
     function generatePsdPreview(file, item) {
         var outFile = cachedPreviewFileFor(item);
         var metaFile = new File(outFile.fsName + ".meta");
-        var srcToken = sourceMtimeToken(file) + "|base_v6";
+        var srcToken = sourceMtimeToken(file) + "|base_v7";
 
         if (outFile.exists && readCacheMeta(metaFile) === srcToken) {
             return outFile;
@@ -209,7 +201,6 @@ app.bringToFront();
             app.activeDocument = dup;
             setAllLayersVisible(dup);
             ensureTransparentBackground(dup);
-            try { dup.mergeVisibleLayers(); } catch (e0) {}
 
             var originalUnits = app.preferences.rulerUnits;
             app.preferences.rulerUnits = Units.PIXELS;
@@ -356,13 +347,72 @@ app.bringToFront();
         state.activePreview = null;
     }
 
-    function getOrCreateGroup(doc, groupName) {
-        for (var i = 0; i < doc.layerSets.length; i++) {
-            if (doc.layerSets[i].name.toLowerCase() === groupName.toLowerCase()) return doc.layerSets[i];
+    function normalizeGroupName(name) {
+        var n = (name || "").toLowerCase();
+        n = n.replace(/[^a-z0-9]/g, "");
+        if (n.length > 3 && n.charAt(n.length - 1) === "s") n = n.substring(0, n.length - 1);
+        return n;
+    }
+
+    function editDistance(a, b) {
+        var m = a.length;
+        var n = b.length;
+        var dp = [];
+        for (var i = 0; i <= m; i++) {
+            dp[i] = [];
+            dp[i][0] = i;
         }
+        for (var j = 0; j <= n; j++) dp[0][j] = j;
+        for (var r = 1; r <= m; r++) {
+            for (var c = 1; c <= n; c++) {
+                var cost = a.charAt(r - 1) === b.charAt(c - 1) ? 0 : 1;
+                var del = dp[r - 1][c] + 1;
+                var ins = dp[r][c - 1] + 1;
+                var sub = dp[r - 1][c - 1] + cost;
+                var best = del < ins ? del : ins;
+                dp[r][c] = best < sub ? best : sub;
+            }
+        }
+        return dp[m][n];
+    }
+
+    function getOrCreateGroup(doc, groupName) {
+        var wanted = groupName || "default";
+        var normalizedWanted = normalizeGroupName(wanted);
+        var best = null;
+        var bestScore = 999;
+
+        for (var i = 0; i < doc.layerSets.length; i++) {
+            var current = doc.layerSets[i];
+            var currentNorm = normalizeGroupName(current.name);
+            if (currentNorm === normalizedWanted) return current;
+            var score = editDistance(normalizedWanted, currentNorm);
+            if (score < bestScore) {
+                best = current;
+                bestScore = score;
+            }
+        }
+
+        if (best && bestScore <= 2) return best;
+
         var g = doc.layerSets.add();
-        g.name = groupName;
+        g.name = wanted;
         return g;
+    }
+
+    function duplicateAllLayersAsGroup(srcDoc, targetDoc, groupName) {
+        var holder = srcDoc.layerSets.add();
+        holder.name = "__KIT_TRANSFER__";
+
+        for (var i = srcDoc.layers.length - 1; i >= 0; i--) {
+            var lyr = srcDoc.layers[i];
+            if (lyr !== holder) {
+                lyr.move(holder, ElementPlacement.INSIDE);
+            }
+        }
+
+        holder.name = groupName;
+        holder.duplicate(targetDoc, ElementPlacement.PLACEATBEGINNING);
     }
 
     function placeInternal(item, previewOnly) {
@@ -375,15 +425,23 @@ app.bringToFront();
         var file = new File(state.sourceFolder.fsName + "/" + item.path);
         if (!file.exists) throw new Error("Asset missing: " + file.fsName);
 
-        var src = app.open(file);
-        if (isPsd(item.fileName)) {
+        var src = null;
+        try {
+            src = app.open(file);
             setAllLayersVisible(src);
             ensureTransparentBackground(src);
-            try { src.mergeVisibleLayers(); } catch (e1) {}
+
+            if (isPsd(item.fileName)) {
+                duplicateAllLayersAsGroup(src, targetDoc, item.name);
+            } else {
+                src.activeLayer.name = item.name;
+                src.activeLayer.duplicate(targetDoc, ElementPlacement.PLACEATBEGINNING);
+            }
+            src.close(SaveOptions.DONOTSAVECHANGES);
+            src = null;
+        } finally {
+            try { if (src) src.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
         }
-        src.activeLayer.name = item.name;
-        src.activeLayer.duplicate(targetDoc, ElementPlacement.PLACEATBEGINNING);
-        src.close(SaveOptions.DONOTSAVECHANGES);
 
         app.activeDocument = targetDoc;
         var layer = targetDoc.activeLayer;
@@ -418,7 +476,7 @@ app.bringToFront();
             try {
                 var group = getOrCreateGroup(targetDoc, item.category || "default");
                 layer.move(group, ElementPlacement.INSIDE);
-            } catch (e) {}
+            } catch (e1) {}
         }
     }
 
@@ -488,10 +546,6 @@ app.bringToFront();
     searchGroup.add("statictext", undefined, "Folder:");
     var categoryDropdown = searchGroup.add("dropdownlist", undefined, []);
     categoryDropdown.preferredSize = [130, 24];
-    searchGroup.add("statictext", undefined, "Zoom:");
-    var zoomDropdown = searchGroup.add("dropdownlist", undefined, ["75%", "100%", "125%", "150%", "200%"]);
-    zoomDropdown.selection = 1;
-    zoomDropdown.preferredSize = [80, 24];
 
     var body = w.add("group");
     body.orientation = "row";
@@ -502,11 +556,11 @@ app.bringToFront();
     var previewPanel = body.add("panel", undefined, "Thumbnail");
     previewPanel.orientation = "column";
     previewPanel.alignChildren = ["center", "top"];
-    previewPanel.preferredSize = [320, 420];
+    previewPanel.preferredSize = [380, 460];
     var previewImage = previewPanel.add("image", undefined, undefined);
-    previewImage.preferredSize = [240, 240];
+    previewImage.preferredSize = [320, 320];
     var previewLabel = previewPanel.add("statictext", undefined, "Select an asset", { multiline: true });
-    previewLabel.preferredSize = [240, 70];
+    previewLabel.preferredSize = [320, 70];
 
     var actions = w.add("group");
     var previewBtn = actions.add("button", undefined, "Preview On Document");
@@ -535,15 +589,6 @@ app.bringToFront();
     categoryDropdown.onChange = function () {
         state.selectedCategory = categoryDropdown.selection ? categoryDropdown.selection.text : "all";
         refreshList();
-    };
-
-    zoomDropdown.onChange = function () {
-        var txt = zoomDropdown.selection ? zoomDropdown.selection.text : "100%";
-        state.previewZoom = parseInt(txt, 10) || 100;
-        var size = getPreviewDisplaySize();
-        previewImage.preferredSize = [size, size];
-        previewLabel.preferredSize = [size, 70];
-        w.layout.layout(true);
     };
 
     list.onChange = function () {
