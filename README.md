@@ -1,27 +1,49 @@
-# KIT UV Library (Photoshop UXP Plugin)
+# KIT UV Library
 
-A dark-mode Photoshop panel for kit-design libraries where each asset is placed using saved UV coordinates.
+You now have **two ways** to use this workflow:
 
-## Why this solves your issue
+1. **UXP plugin panel** (dark mode, modern panel UI) — requires Photoshop plugin developer mode setup.
+2. **No-login JSX script** — runs from `File → Scripts → Browse...` and does **not** require creating a UXP developer plugin package.
 
-Default drag/drop into Photoshop Libraries often loses the original UV position context. This plugin places assets by explicit `x`, `y`, `width`, and `height` values from your library data, so a collar lands where a collar belongs.
+---
 
-## Features
+## Option A: UXP plugin panel (dark mode)
 
-- Dark mode, simple panel UI.
-- Search/filter assets quickly.
-- Works with modern Photoshop (manifest v5, `minVersion` 25).
-- UV-aware placement with optional scaling based on a reference document size.
+Files used:
+- `manifest.json`
+- `index.html`
+- `styles.css`
+- `main.js`
 
-## Install (Developer mode)
-
-1. In Photoshop, open **Plugins → Development → Load Unpacked**.
+### Install (Developer mode)
+1. Photoshop → **Plugins → Development → Load Unpacked**.
 2. Select this folder (`Photoshop-Library`).
-3. Open the **KIT UV Library** panel.
+3. Open **KIT UV Library** panel.
+
+> If Photoshop asks for developer account/login in your environment, use **Option B** below.
+
+---
+
+## Option B: No Adobe developer login (JSX script)
+
+File used:
+- `photoshop-kit-uv-library.jsx`
+
+### Run
+1. Open your target PSD first.
+2. Photoshop → **File → Scripts → Browse...**
+3. Select `photoshop-kit-uv-library.jsx`.
+4. In the script window:
+   - Click **Load Library JSON**
+   - Click **Choose Assets Folder**
+   - Search/select an item
+   - Click **Place Selected**
+
+This script uses the same UV placement idea (`x`, `y`, `width`, `height`) and scales coordinates using `referenceDocument` when provided.
+
+---
 
 ## Library JSON format
-
-Create a JSON file like:
 
 ```json
 {
@@ -40,13 +62,12 @@ Create a JSON file like:
 }
 ```
 
-- `path` is relative to the **Assets Folder** you choose inside the plugin.
-- `referenceDocument` is optional. If provided, coordinates are scaled to the current PSD size.
+- `path` is relative to the assets folder you choose.
+- `referenceDocument` is optional. If present, values are scaled to active PSD size.
 
-## Usage
+---
 
-1. Load your library JSON.
-2. Choose the assets folder.
-3. Open a PSD.
-4. Click **Place in document** on an asset.
+## Important note about Adobe login
 
+- For **UXP plugin development workflows**, Adobe may require account sign-in depending on your Photoshop build/policy.
+- If your goal is to avoid that entirely, the included **JSX script path** is the practical workaround.
