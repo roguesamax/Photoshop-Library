@@ -181,7 +181,7 @@ app.bringToFront();
     function generatePsdPreview(file, item) {
         var outFile = cachedPreviewFileFor(item);
         var metaFile = new File(outFile.fsName + ".meta");
-        var srcToken = sourceMtimeToken(file) + "|base_v7";
+        var srcToken = sourceMtimeToken(file) + "|base_v8";
 
         if (outFile.exists && readCacheMeta(metaFile) === srcToken) {
             return outFile;
@@ -201,6 +201,11 @@ app.bringToFront();
             app.activeDocument = dup;
             setAllLayersVisible(dup);
             ensureTransparentBackground(dup);
+            try {
+                dup.mergeVisibleLayers();
+            } catch (e0) {
+                try { dup.flatten(); } catch (e1) {}
+            }
 
             var originalUnits = app.preferences.rulerUnits;
             app.preferences.rulerUnits = Units.PIXELS;
@@ -401,18 +406,17 @@ app.bringToFront();
     }
 
     function duplicateAllLayersAsGroup(srcDoc, targetDoc, groupName) {
-        var holder = srcDoc.layerSets.add();
-        holder.name = "__KIT_TRANSFER__";
+        var targetGroup = targetDoc.layerSets.add();
+        targetGroup.name = groupName;
 
         for (var i = srcDoc.layers.length - 1; i >= 0; i--) {
             var lyr = srcDoc.layers[i];
-            if (lyr !== holder) {
-                lyr.move(holder, ElementPlacement.INSIDE);
-            }
+            var duplicated = lyr.duplicate(targetDoc, ElementPlacement.PLACEATBEGINNING);
+            duplicated.move(targetGroup, ElementPlacement.INSIDE);
         }
 
-        holder.name = groupName;
-        holder.duplicate(targetDoc, ElementPlacement.PLACEATBEGINNING);
+        app.activeDocument = targetDoc;
+        targetDoc.activeLayer = targetGroup;
     }
 
     function placeInternal(item, previewOnly) {
