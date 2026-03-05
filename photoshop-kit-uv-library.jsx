@@ -7,112 +7,107 @@ app.bringToFront();
         return;
     }
 
+    var REFERENCE_UV = { width: 4096, height: 4096 };
+    var UV_PRESETS = {
+        collars: { x: 1540, y: 170, width: 1020, height: 430 },
+        shorts: { x: 1450, y: 2800, width: 1200, height: 900 },
+        sleeves: { x: 200, y: 900, width: 980, height: 1600 },
+        sponsors: { x: 1520, y: 1300, width: 1060, height: 600 },
+        numbers: { x: 1630, y: 1550, width: 840, height: 980 },
+        "default": { x: 1500, y: 1500, width: 1000, height: 1000 }
+    };
+
     var state = {
-        library: null,
-        assetsFolder: null,
+        sourceFolder: null,
+        items: [],
         filteredItems: []
     };
+
+    function setStatus(text) {
+        statusText.text = text;
+    }
 
     function asNumber(value, fallback) {
         var n = Number(value);
         return isNaN(n) ? fallback : n;
     }
 
-    function validateLibrary(data) {
-        if (!data || !data.items || !(data.items instanceof Array)) {
-            throw new Error("Library JSON must contain an items array.");
-        }
-
-        for (var i = 0; i < data.items.length; i++) {
-            var item = data.items[i];
-            var fields = ["name", "path", "x", "y", "width", "height"];
-            for (var f = 0; f < fields.length; f++) {
-                var key = fields[f];
-                if (item[key] === undefined || item[key] === null) {
-                    throw new Error("Item " + (i + 1) + " missing field: " + key);
-                }
-            }
-        }
-    }
-
-    function readJsonFile(file) {
-        file.encoding = "UTF8";
-        if (!file.open("r")) {
-            throw new Error("Unable to open JSON file.");
-        }
-        var raw = file.read();
-        file.close();
-        var data;
-        try {
-            data = JSON.parse(raw);
-        } catch (e) {
-            throw new Error("Invalid JSON: " + e.message);
-        }
-        validateLibrary(data);
-        return data;
-    }
-
     function getDocSizePx(doc) {
         var original = app.preferences.rulerUnits;
         app.preferences.rulerUnits = Units.PIXELS;
-        var out = {
-            width: doc.width.as("px"),
-            height: doc.height.as("px")
-        };
+        var out = { width: doc.width.as("px"), height: doc.height.as("px") };
         app.preferences.rulerUnits = original;
         return out;
     }
 
-    function setStatus(text) {
-        statusText.text = text;
+    function isAsset(name) {
+        return /\.(png|jpg|jpeg|psd|tif|tiff)$/i.test(name);
+    }
+
+    function normalizePath(path) {
+        return path.replace(/\\/g, "/");
+    }
+
+    function scanFolder(folder, relPrefix, category, depth, out) {
+        var files = folder.getFiles();
+        for (var i = 0; i < files.length; i++) {
+            var item = files[i];
+            var rel = relPrefix ? relPrefix + "/" + item.name : item.name;
+            rel = normalizePath(rel);
+
+            if (item instanceof Folder) {
+                var nextCategory = depth === 0 ? item.name.toLowerCase() : category;
+                scanFolder(item, rel, nextCategory, depth + 1, out);
+            } else if (item instanceof File && isAsset(item.name)) {
+                out.push({
+                    name: item.name.replace(/\.[^.]+$/, ""),
+                    path: rel,
+                    category: (category || "default").toLowerCase()
+                });
+            }
+        }
     }
 
     function refreshList() {
         list.removeAll();
-
-        if (!state.library) {
-            setStatus("Load a library JSON first.");
+        if (!state.sourceFolder) {
+            setStatus("Choose source folder first.");
             return;
         }
 
         var q = (searchInput.text || "").toLowerCase();
         state.filteredItems = [];
 
-        for (var i = 0; i < state.library.items.length; i++) {
-            var item = state.library.items[i];
+        for (var i = 0; i < state.items.length; i++) {
+            var item = state.items[i];
             if (!q || item.name.toLowerCase().indexOf(q) !== -1 || item.path.toLowerCase().indexOf(q) !== -1) {
                 state.filteredItems.push(item);
-                list.add("item", item.name + "  [" + item.path + "]");
+                list.add("item", "[" + item.category + "] " + item.name + "  (" + item.path + ")");
             }
         }
 
-        if (!state.filteredItems.length) {
-            setStatus("No matching assets.");
-        } else {
-            setStatus("Ready. " + state.filteredItems.length + " item(s) visible.");
-        }
+        setStatus(state.filteredItems.length ? (state.filteredItems.length + " item(s) visible.") : "No matching assets.");
+    }
+
+    function buildFileFromRelative(rootFolder, relPath) {
+        return new File(rootFolder.fsName + "/" + relPath);
     }
 
     function placeItem(item) {
-        if (!state.assetsFolder) {
-            throw new Error("Select assets folder first.");
-        }
-
         var targetDoc = app.activeDocument;
         var docSize = getDocSizePx(targetDoc);
-        var ref = state.library.referenceDocument || docSize;
+        var scaleX = docSize.width / REFERENCE_UV.width;
+        var scaleY = docSize.height / REFERENCE_UV.height;
+        var slot = UV_PRESETS[item.category] || UV_PRESETS["default"];
 
-        var scaleX = docSize.width / asNumber(ref.width, docSize.width);
-        var scaleY = docSize.height / asNumber(ref.height, docSize.height);
+        var x = asNumber(slot.x, 0) * scaleX;
+        var y = asNumber(slot.y, 0) * scaleY;
+        var w = asNumber(slot.width, 1000) * scaleX;
+        var h = asNumber(slot.height, 1000) * scaleY;
 
-        var x = asNumber(item.x, 0) * scaleX;
-        var y = asNumber(item.y, 0) * scaleY;
-        var w = asNumber(item.width, 0) * scaleX;
-        var h = asNumber(item.height, 0) * scaleY;
-
-        var file = new File(state.assetsFolder.fsName + "/" + item.path);
+        var file = buildFileFromRelative(state.sourceFolder, item.path);
         if (!file.exists) {
-            throw new Error("Asset not found: " + file.fsName);
+            throw new Error("Asset missing: " + file.fsName);
         }
 
         var src = app.open(file);
@@ -129,78 +124,56 @@ app.bringToFront();
         var b = layer.bounds;
         var currentW = b[2].as("px") - b[0].as("px");
         var currentH = b[3].as("px") - b[1].as("px");
-
         if (currentW <= 0 || currentH <= 0) {
             app.preferences.rulerUnits = original;
-            throw new Error("Invalid layer bounds for: " + item.name);
+            throw new Error("Invalid bounds for: " + item.name);
         }
 
-        var resizeX = (w / currentW) * 100;
-        var resizeY = (h / currentH) * 100;
-        layer.resize(resizeX, resizeY, AnchorPosition.TOPLEFT);
-
+        layer.resize((w / currentW) * 100, (h / currentH) * 100, AnchorPosition.TOPLEFT);
         b = layer.bounds;
-        var left = b[0].as("px");
-        var top = b[1].as("px");
-        var dx = x - left;
-        var dy = y - top;
-        layer.translate(UnitValue(dx, "px"), UnitValue(dy, "px"));
+        layer.translate(UnitValue(x - b[0].as("px"), "px"), UnitValue(y - b[1].as("px"), "px"));
 
         app.preferences.rulerUnits = original;
     }
 
-    var w = new Window("dialog", "KIT UV Library (No Adobe Login)");
+    var w = new Window("dialog", "KIT UV Library (Folder-based)");
     w.orientation = "column";
     w.alignChildren = ["fill", "top"];
 
-    var loadBtn = w.add("button", undefined, "Load Library JSON");
-    var assetsBtn = w.add("button", undefined, "Choose Assets Folder");
+    var chooseBtn = w.add("button", undefined, "Choose Source Folder");
 
     var searchGroup = w.add("group");
     searchGroup.orientation = "row";
-    searchGroup.alignChildren = ["fill", "center"];
     searchGroup.add("statictext", undefined, "Search:");
     var searchInput = searchGroup.add("edittext", undefined, "");
-    searchInput.characters = 36;
+    searchInput.characters = 40;
 
     var list = w.add("listbox", undefined, [], { multiselect: false });
-    list.preferredSize = [560, 260];
+    list.preferredSize = [620, 280];
 
     var placeBtn = w.add("button", undefined, "Place Selected");
-    var statusText = w.add("statictext", undefined, "Load a library to start.");
+    var statusText = w.add("statictext", undefined, "Choose source folder to begin.");
 
-    loadBtn.onClick = function () {
-        try {
-            var file = File.openDialog("Choose library JSON", "*.json");
-            if (!file) return;
-            state.library = readJsonFile(file);
-            refreshList();
-            setStatus("Loaded " + (state.library.name || file.name) + " with " + state.library.items.length + " items.");
-        } catch (e) {
-            setStatus("Error: " + e.message);
-        }
-    };
-
-    assetsBtn.onClick = function () {
-        var folder = Folder.selectDialog("Choose assets folder");
+    chooseBtn.onClick = function () {
+        var folder = Folder.selectDialog("Select source folder with subfolders (Collars, Shorts, etc)");
         if (!folder) return;
-        state.assetsFolder = folder;
-        setStatus("Assets folder: " + folder.fsName);
+
+        state.sourceFolder = folder;
+        state.items = [];
+        scanFolder(folder, "", null, 0, state.items);
+        refreshList();
+        setStatus("Loaded " + state.items.length + " assets from " + folder.fsName);
     };
 
     searchInput.onChanging = refreshList;
 
     placeBtn.onClick = function () {
         try {
-            if (!state.library) {
-                throw new Error("Load a library first.");
-            }
-            if (!list.selection) {
-                throw new Error("Select an item from the list.");
-            }
+            if (!state.sourceFolder) throw new Error("Choose source folder first.");
+            if (!list.selection) throw new Error("Select an asset.");
             var item = state.filteredItems[list.selection.index];
             placeItem(item);
-            setStatus("Placed: " + item.name);
+            setStatus("Placed " + item.name + " in " + item.category + " slot.");
         } catch (e) {
             setStatus("Error: " + e.message);
         }
