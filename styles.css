@@ -183,3 +183,13 @@ footer.error {
 .item-actions button {
   width: 100%;
 }
+
+
+.category-heading {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+  color: var(--accent-strong);
+  padding: 2px 2px 0;
+}

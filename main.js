@@ -131,47 +131,65 @@ function renderItems() {
   }
 
   const query = searchInput.value.trim().toLowerCase();
-  const items = state.items.filter((item) => !query || item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query));
+  const filtered = state.items.filter((item) => !query || item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query));
 
-  if (!items.length) {
+  if (!filtered.length) {
     listEl.innerHTML = '<div class="hint">No matching assets.</div>';
     return;
   }
 
-  for (const item of items) {
-    const preset = UV_PRESETS[item.category] || UV_PRESETS.default;
-    const row = document.createElement("article");
-    row.className = "item";
+  const grouped = new Map();
+  for (const item of filtered) {
+    const key = item.category || "default";
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(item);
+  }
 
-    const thumb = item.thumbnail
-      ? `<img class="thumb" src="${item.thumbnail}" alt="${item.name}" />`
-      : `<div class="thumb thumb-placeholder">${isPsd(item.fileName) ? "PSD" : "No preview"}</div>`;
+  const categories = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b));
 
-    row.innerHTML = `
-      <div class="item-layout">
-        ${thumb}
-        <div>
-          <div class="item-title">${item.name}</div>
-          <div class="meta">${item.path}</div>
-          <div class="meta">${isPsd(item.fileName) ? "PSD keeps native position/scale" : `UV slot ${preset.x},${preset.y},${preset.width},${preset.height}`}</div>
+  for (const category of categories) {
+    const heading = document.createElement("div");
+    heading.className = "category-heading";
+    heading.textContent = category;
+    listEl.appendChild(heading);
+
+    const items = grouped.get(category).sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const item of items) {
+      const preset = UV_PRESETS[item.category] || UV_PRESETS.default;
+      const row = document.createElement("article");
+      row.className = "item";
+
+      const thumb = item.thumbnail
+        ? `<img class="thumb" src="${item.thumbnail}" alt="${item.name}" />`
+        : `<div class="thumb thumb-placeholder">${isPsd(item.fileName) ? "PSD" : "No preview"}</div>`;
+
+      row.innerHTML = `
+        <div class="item-layout">
+          ${thumb}
+          <div>
+            <div class="item-title">${item.name}</div>
+            <div class="meta">${item.path}</div>
+            <div class="meta">${isPsd(item.fileName) ? "PSD keeps native position/scale" : `UV slot ${preset.x},${preset.y},${preset.width},${preset.height}`}</div>
+          </div>
         </div>
-      </div>
-    `;
+      `;
 
-    const actions = document.createElement("div");
-    actions.className = "item-actions";
+      const actions = document.createElement("div");
+      actions.className = "item-actions";
 
-    const previewBtn = document.createElement("button");
-    previewBtn.textContent = "Preview on document";
-    previewBtn.addEventListener("click", () => previewItem(item));
+      const previewBtn = document.createElement("button");
+      previewBtn.textContent = "Preview on document";
+      previewBtn.addEventListener("click", () => previewItem(item));
 
-    const placeBtn = document.createElement("button");
-    placeBtn.textContent = "Place in document";
-    placeBtn.addEventListener("click", () => placeItem(item));
+      const placeBtn = document.createElement("button");
+      placeBtn.textContent = "Place in document";
+      placeBtn.addEventListener("click", () => placeItem(item));
 
-    actions.append(previewBtn, placeBtn);
-    row.appendChild(actions);
-    listEl.appendChild(row);
+      actions.append(previewBtn, placeBtn);
+      row.appendChild(actions);
+      listEl.appendChild(row);
+    }
   }
 }
 

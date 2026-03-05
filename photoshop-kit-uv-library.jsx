@@ -184,18 +184,39 @@ app.bringToFront();
 
         var original = app.preferences.rulerUnits;
         app.preferences.rulerUnits = Units.PIXELS;
+
+        var target = 240;
         var w = dup.width.as("px");
         var h = dup.height.as("px");
-        var max = 220;
-        var ratio = w > h ? (max / w) : (max / h);
-        if (ratio < 1) {
-            dup.resizeImage(UnitValue(Math.round(w * ratio), "px"), UnitValue(Math.round(h * ratio), "px"), null, ResampleMethod.BICUBIC);
-        }
+        var ratio = w > h ? (target / w) : (target / h);
+        if (ratio <= 0) ratio = 1;
+
+        var resizedW = Math.max(1, Math.round(w * ratio));
+        var resizedH = Math.max(1, Math.round(h * ratio));
+        dup.resizeImage(UnitValue(resizedW, "px"), UnitValue(resizedH, "px"), null, ResampleMethod.BICUBIC);
+
+        var canvas = app.documents.add(UnitValue(target, "px"), UnitValue(target, "px"), 72, "cacheThumb", NewDocumentMode.RGB, DocumentFill.TRANSPARENT);
+        dup.activeLayer.duplicate(canvas, ElementPlacement.PLACEATBEGINNING);
+        dup.close(SaveOptions.DONOTSAVECHANGES);
+
+        app.activeDocument = canvas;
+        var layer = canvas.activeLayer;
+        var b = layer.bounds;
+        var left = b[0].as("px");
+        var top = b[1].as("px");
+        var right = b[2].as("px");
+        var bottom = b[3].as("px");
+        var cw = right - left;
+        var ch = bottom - top;
+        var tx = (target - cw) / 2 - left;
+        var ty = (target - ch) / 2 - top;
+        layer.translate(UnitValue(tx, "px"), UnitValue(ty, "px"));
+
         app.preferences.rulerUnits = original;
 
         var pngOptions = new PNGSaveOptions();
-        dup.saveAs(outFile, pngOptions, true);
-        dup.close(SaveOptions.DONOTSAVECHANGES);
+        canvas.saveAs(outFile, pngOptions, true);
+        canvas.close(SaveOptions.DONOTSAVECHANGES);
 
         writeCacheMeta(metaFile, file);
         return outFile;
@@ -374,11 +395,11 @@ app.bringToFront();
     var previewPanel = body.add("panel", undefined, "Thumbnail");
     previewPanel.orientation = "column";
     previewPanel.alignChildren = ["center", "top"];
-    previewPanel.preferredSize = [260, 320];
+    previewPanel.preferredSize = [280, 340];
     var previewImage = previewPanel.add("image", undefined, undefined);
-    previewImage.preferredSize = [220, 220];
+    previewImage.preferredSize = [240, 240];
     var previewLabel = previewPanel.add("statictext", undefined, "Select an asset", { multiline: true });
-    previewLabel.preferredSize = [220, 60];
+    previewLabel.preferredSize = [240, 70];
 
     var actions = w.add("group");
     var previewBtn = actions.add("button", undefined, "Preview On Document");
