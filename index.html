@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KIT UV Library</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <h1>KIT UV Library</h1>
+        <p>Place kit elements at exact UV coordinates.</p>
+      </header>
+
+      <section class="controls card">
+        <button id="loadLibraryBtn">Load Library JSON</button>
+        <button id="chooseAssetsFolderBtn">Choose Assets Folder</button>
+        <div class="hint" id="libraryMeta">No library loaded.</div>
+        <div class="hint" id="assetsMeta">No assets folder selected.</div>
+      </section>
+
+      <section class="card">
+        <div class="row">
+          <label for="searchInput">Search</label>
+          <input id="searchInput" type="text" placeholder="Collar, sleeve, sponsor..." />
+        </div>
+        <div class="list" id="assetList"></div>
+      </section>
+
+      <section class="card">
+        <h2>Library format</h2>
+        <pre>{
+  "name": "My Kit",
+  "referenceDocument": { "width": 4096, "height": 4096 },
+  "items": [
+    {
+      "name": "Home Collar",
+      "path": "collars/home-collar.png",
+      "x": 1630,
+      "y": 210,
+      "width": 820,
+      "height": 350
+    }
+  ]
+}</pre>
+      </section>
+
+      <footer id="status">Ready.</footer>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
